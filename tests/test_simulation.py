@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config
+from tippspiel.config import load_config, resolve_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.model.types import Result
 from tippspiel.pipeline import build_predictor
@@ -18,8 +18,8 @@ REPO = Path(tippspiel.__file__).parent.parent
 @pytest.fixture(scope="module")
 def env():
     cfg = load_config(REPO / "config.yaml")
-    prov = FileDataProvider(cfg.data.teams_file, cfg.data.fixtures_file,
-                            cfg.data.results_file, cfg.data.bracket_map_file)
+    b = resolve_tournament("wc2026")
+    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file, b.bracket_map_file)
     teams = {t.team_id: t for t in prov.get_teams()}
     return {
         "teams": teams,
@@ -48,7 +48,7 @@ def test_reproducible_for_same_seed(env):
 def test_probabilities_are_valid(env):
     out = _sim(env, {}, 2000, 1).run()
     title_sum = sum(out.advancement[t]["wins_title"] for t in out.advancement)
-    qualify_sum = sum(out.advancement[t]["qualifies_r32"] for t in out.advancement)
+    qualify_sum = sum(out.advancement[t]["reach_r32"] for t in out.advancement)
     assert title_sum == pytest.approx(1.0, abs=1e-9)   # exactly one champion per iter
     assert qualify_sum == pytest.approx(32.0, abs=1e-9)  # exactly 32 qualifiers per iter
     for a in out.advancement.values():
@@ -59,8 +59,8 @@ def test_convergence_stabilises(env):
     small = _sim(env, {}, 3000, 11).run()
     large = _sim(env, {}, 15000, 11).run()
     # A high, stable probability should agree closely across sample sizes.
-    assert small.advancement["FRA"]["qualifies_r32"] == pytest.approx(
-        large.advancement["FRA"]["qualifies_r32"], abs=0.05
+    assert small.advancement["FRA"]["reach_r32"] == pytest.approx(
+        large.advancement["FRA"]["reach_r32"], abs=0.05
     )
     assert large.mc_standard_error < small.mc_standard_error
 
@@ -78,4 +78,4 @@ def test_partial_state_drives_simulation(env):
     }
     out = _sim(env, played, 1000, 3).run()
     assert out.advancement["MEX"]["group_winner"] == pytest.approx(1.0)
-    assert out.advancement["MEX"]["qualifies_r32"] == pytest.approx(1.0)
+    assert out.advancement["MEX"]["reach_r32"] == pytest.approx(1.0)

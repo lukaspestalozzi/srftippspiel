@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config
+from tippspiel.config import load_config, resolve_tournament
 from tippspiel.model.types import Result
 from tippspiel.pipeline import run_pipeline, write_report
 
 REPO = Path(tippspiel.__file__).parent.parent
+BUNDLE = resolve_tournament("wc2026")
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +23,7 @@ def small_cfg():
 
 
 def test_predict_only_pipeline(small_cfg):
-    result = run_pipeline(small_cfg, simulate=False)
+    result = run_pipeline(small_cfg, BUNDLE, simulate=False)
     # 72 group fixtures, all tippable, no simulation-dependent bonus answers required.
     assert len(result["tipset"].tips) == 72
     assert result["outcome"] is None
@@ -32,7 +33,7 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     cfg = dataclasses.replace(
         small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
     )
-    result = run_pipeline(cfg, simulate=True)
+    result = run_pipeline(cfg, BUNDLE, simulate=True)
     path = write_report(cfg, result["context"])
     html = Path(path).read_text()
 
@@ -55,7 +56,7 @@ def test_played_match_excluded_from_tips(small_cfg):
     orig = FileDataProvider.get_results
     FileDataProvider.get_results = lambda self: [Result("G_A_1", 1, 0)]
     try:
-        result = run_pipeline(cfg, simulate=False)
+        result = run_pipeline(cfg, BUNDLE, simulate=False)
     finally:
         FileDataProvider.get_results = orig
     assert "G_A_1" not in result["tipset"].tips

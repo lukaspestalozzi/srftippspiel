@@ -153,13 +153,15 @@ def title_odds_bar(rows: list[tuple[str, float]]) -> str:
     return _fig_to_div(fig)
 
 
-def bracket_progression(rows: list[dict]) -> str:
+def bracket_progression(rows: list[dict], rounds: list[str] | None = None) -> str:
     """Round-by-round reach probabilities for the leading teams (spec §6.7.2 item 6).
 
-    rows: [{team, probs: [qualify, r16, qf, sf, final, title]}], one line per team.
-    A clean static diagram of how far each contender is likely to advance.
+    rows: [{team, probs: [...]}], one line per team; ``rounds`` are the matching x-axis
+    labels (defaults to the WC2026 R32->Final sequence). A clean static diagram of how far
+    each contender is likely to advance.
     """
-    rounds = ["Qualify R32", "Reach R16", "Reach QF", "Reach SF", "Reach Final", "Champion"]
+    if rounds is None:
+        rounds = ["Qualify R32", "Reach R16", "Reach QF", "Reach SF", "Reach Final", "Champion"]
     fig = go.Figure()
     for r in rows:
         fig.add_trace(

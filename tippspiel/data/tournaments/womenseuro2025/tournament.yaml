@@ -1,0 +1,16 @@
+name: womenseuro2025
+display_name: UEFA Women's Euro 2025
+completed: true         # all results known; used by `tippspiel verify` as a backtest benchmark
+
+teams_file: teams.csv
+fixtures_file: fixtures.csv
+results_file: results.csv
+bracket_map_file: bracket_map.json
+
+# Pre-tournament ratings: best-effort June-2025 FIFA Women's World Ranking points (the FIFA
+# women's ranking is itself an Elo system). Values are approximate/provisional and rounded to
+# signal that; they are pre-tournament so the verification backtest has no result leakage.
+elo_source: "FIFA Women's World Ranking ~June 2025 (Elo-based); approximate, provisional"
+
+bonus_questions:
+  - { id: champion, points: 50 }

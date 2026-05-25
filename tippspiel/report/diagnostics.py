@@ -178,21 +178,25 @@ def _behaviour_notes(pb: dict) -> list[str]:
 def _simulation_section(outcome, teams, fixtures) -> dict | None:
     if outcome is None:
         return None
+    # The first knockout round's reach metric (reach_r32 for WC2026, reach_qf for a 16-team
+    # tournament) is the first reach_* key in the stage-ordered advancement dict.
+    sample = next(iter(outcome.advancement.values()))
+    first_reach = next((k for k in sample if k.startswith("reach_")), "wins_title")
     title_sum = sum(a.get("wins_title", 0.0) for a in outcome.advancement.values())
-    qualify_sum = sum(a.get("qualifies_r32", 0.0) for a in outcome.advancement.values())
+    qualify_sum = sum(a.get(first_reach, 0.0) for a in outcome.advancement.values())
     title_odds = sorted(
         ({"team": teams[t].name, "p": a.get("wins_title", 0.0)}
          for t, a in outcome.advancement.items() if a.get("wins_title", 0.0) > 0),
         key=lambda d: d["p"], reverse=True,
     )[:15]
-    groups: dict[str, list[str]] = {}
+    groups: dict[str, set] = {}
     for m in fixtures:
         if m.group:
             groups.setdefault(m.group, set()).update({m.home.team_id, m.away.team_id})
     group_qual = {}
     for letter in sorted(groups):
         rows = sorted(
-            ({"team": teams[t].name, "p": outcome.advancement[t].get("qualifies_r32", 0.0)}
+            ({"team": teams[t].name, "p": outcome.advancement[t].get(first_reach, 0.0)}
              for t in groups[letter]),
             key=lambda d: d["p"], reverse=True,
         )
@@ -201,6 +205,7 @@ def _simulation_section(outcome, teams, fixtures) -> dict | None:
         "iterations": outcome.mc_iterations,
         "seed": outcome.mc_seed,
         "max_standard_error": outcome.mc_standard_error,
+        "first_reach_metric": first_reach,
         "title_prob_sum": title_sum,
         "qualify_prob_sum": qualify_sum,
         "title_odds": title_odds,
@@ -232,9 +237,9 @@ def _bonus_history(qid, dist, mean, mode) -> tuple[str, str]:
     return "INFO", "no historical reference"
 
 
-def _bonus_section(cfg, teams, outcome) -> list[dict]:
+def _bonus_section(bundle, teams, outcome) -> list[dict]:
     out = []
-    for q in build_bonus_questions(cfg.bonus_questions):
+    for q in build_bonus_questions(bundle.bonus_questions):
         dist = q.resolve(outcome) if outcome is not None or q.question_id == "top_scorer_goals" else {}
         if not dist:
             out.append({"id": q.question_id, "label": q.label, "available": False})
@@ -282,10 +287,13 @@ def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
         checks.append({"name": "Sum(wins_title) ~ 1",
                        "status": "PASS" if ts_ok else "FAIL",
                        "detail": f"{sim['title_prob_sum']:.4f} (tol {_TITLE_SUM_TOL})"})
-        qs_ok = abs(sim["qualify_prob_sum"] - 32.0) <= _QUALIFY_SUM_TOL
-        checks.append({"name": "Sum(qualifies_r32) ~ 32",
+        # The number of teams reaching the first KO round is a fixed integer per iteration,
+        # so its expected value must be (near) integer and positive (32 for WC2026, 8 here).
+        qsum = sim["qualify_prob_sum"]
+        qs_ok = qsum > 0 and abs(qsum - round(qsum)) <= _QUALIFY_SUM_TOL
+        checks.append({"name": f"Sum({sim['first_reach_metric']}) is integer",
                        "status": "PASS" if qs_ok else "FAIL",
-                       "detail": f"{sim['qualify_prob_sum']:.4f} (tol {_QUALIFY_SUM_TOL})"})
+                       "detail": f"{qsum:.4f} ~ {round(qsum)} (tol {_QUALIFY_SUM_TOL})"})
 
     by_score = {d["score"]: d["share"] for d in pb["tip_frequency"]}
     low = by_score.get("1:0", 0) + by_score.get("0:1", 0) + by_score.get("1:1", 0)
@@ -313,7 +321,8 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
     L.append("## 1. Run header")
     L.append(_fixed_table(
         ["key", "value"],
-        [["predictor", meta["predictor_name"]],
+        [["tournament", meta.get("tournament", "?")],
+         ["predictor", meta["predictor_name"]],
          ["predictor_params", json.dumps(meta["predictor_params"])],
          ["strategy", meta["strategy_name"]],
          ["simulation", f"{meta['iterations']} iters, seed {meta['seed']}, "
@@ -392,8 +401,8 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
             ["invariant", "value", "status"],
             [["Sum(wins_title)", f"{sim['title_prob_sum']:.4f}",
               "PASS" if abs(sim['title_prob_sum'] - 1) <= _TITLE_SUM_TOL else "FAIL"],
-             ["Sum(qualifies_r32)", f"{sim['qualify_prob_sum']:.4f}",
-              "PASS" if abs(sim['qualify_prob_sum'] - 32) <= _QUALIFY_SUM_TOL else "FAIL"],
+             [f"Sum({sim['first_reach_metric']})", f"{sim['qualify_prob_sum']:.4f}",
+              "PASS" if abs(sim['qualify_prob_sum'] - round(sim['qualify_prob_sum'])) <= _QUALIFY_SUM_TOL else "FAIL"],
              ["max standard error", f"{sim['max_standard_error']:.4f}", "-"]],
         ))
         L.append("")
@@ -439,17 +448,18 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
 
 
 # --------------------------------------------------------------------------- entrypoint
-def build_diagnostics(cfg, teams, fixtures, results, predictions, tipset, outcome, predictor):
+def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor):
     """Return ``(markdown, data)`` for the Claude diagnostic report."""
     records = _fixture_records(fixtures, teams, predictions, tipset)
     pb = _predictor_behaviour(records)
     notes = _behaviour_notes(pb)
     sim = _simulation_section(outcome, teams, fixtures)
-    bonus = _bonus_section(cfg, teams, outcome)
+    bonus = _bonus_section(bundle, teams, outcome)
     anomalies = _anomaly_checks(predictions, records, pb, sim, bonus)
     meta = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "git_head": _git_head(),
+        "tournament": bundle.display_name,
         "predictor_name": predictor.name,
         "predictor_params": getattr(predictor, "params", {}),
         "strategy_name": cfg.strategy.name,

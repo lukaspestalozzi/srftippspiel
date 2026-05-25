@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "description": "UEFA Women's Euro 2025 knockout bracket: 16 teams, top 2 of 4 groups, no third-place qualifiers, QF -> SF -> Final (no third-place playoff).",
+    "source": "https://en.wikipedia.org/wiki/UEFA_Women's_Euro_2025_knockout_stage",
+    "third_place_slots": []
+  },
+  "first_round": {
+    "stage": "QF",
+    "slots": {
+      "1": {"home": {"type": "winner", "group": "A"}, "away": {"type": "runner_up", "group": "B"}},
+      "2": {"home": {"type": "winner", "group": "C"}, "away": {"type": "runner_up", "group": "D"}},
+      "3": {"home": {"type": "winner", "group": "B"}, "away": {"type": "runner_up", "group": "A"}},
+      "4": {"home": {"type": "winner", "group": "D"}, "away": {"type": "runner_up", "group": "C"}}
+    }
+  },
+  "progression": {
+    "5": {"home": {"type": "winner_of", "match": "1"}, "away": {"type": "winner_of", "match": "2"}, "stage": "SF"},
+    "6": {"home": {"type": "winner_of", "match": "3"}, "away": {"type": "winner_of", "match": "4"}, "stage": "SF"},
+    "7": {"home": {"type": "winner_of", "match": "5"}, "away": {"type": "winner_of", "match": "6"}, "stage": "FINAL"}
+  },
+  "third_place_allocation": {}
+}

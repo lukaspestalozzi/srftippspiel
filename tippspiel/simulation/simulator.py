@@ -22,11 +22,6 @@ from .bracket import Bracket
 from .standings import rank_group
 from .thirds import select_best_thirds
 
-_ADV_METRICS = [
-    "group_winner", "group_second", "group_third", "qualifies_r32",
-    "reach_r16", "reach_qf", "reach_sf", "reach_final", "wins_title",
-]
-
 
 class TournamentSimulator:
     def __init__(
@@ -60,6 +55,29 @@ class TournamentSimulator:
         self._group_layouts = self._build_group_layouts()
         self._group_pmf_cache: dict[str, np.ndarray] = {}
         self._pair_cdf = self._build_pair_cdf()
+
+        # Advancement metrics derived from the bracket's stage chain (format-agnostic):
+        # group placements + one "reach_<stage>" per knockout stage + the title.
+        self._groups = sorted(self._group_layouts)
+        chain = self.bracket.stage_chain
+        self._adv_metrics = (
+            ["group_winner", "group_second", "group_third"]
+            + [self._reach_metric(s) for s in chain]
+            + ["wins_title"]
+        )
+
+    def _reach_metric(self, stage: str) -> str:
+        return "reach_" + stage.lower()
+
+    def _winner_metric(self, stage: str) -> str | None:
+        """Metric credited to the winner of a match at ``stage`` (i.e. the stage they reach
+        next). ``None`` for the third-place consolation, ``wins_title`` for the final."""
+        if stage == "FINAL":
+            return "wins_title"
+        if stage == "THIRD_PLACE":
+            return None
+        chain = self.bracket.stage_chain
+        return self._reach_metric(chain[chain.index(stage) + 1])
 
     # ----- setup ---------------------------------------------------------------
     def _build_group_layouts(self) -> dict[str, dict]:
@@ -154,29 +172,31 @@ class TournamentSimulator:
     # ----- run -----------------------------------------------------------------
     def run(self) -> TournamentOutcome:
         n, nt = self.n, self.nteams
-        counts = {m: np.zeros(nt) for m in _ADV_METRICS}
+        counts = {m: np.zeros(nt) for m in self._adv_metrics}
         # Per-iteration tallies for the Swiss-goals and 0:0-count bonus questions.
         team_goals = np.zeros((n, nt), dtype=np.int64)
         zero_zero = np.zeros(n, dtype=np.int64)
         it = np.arange(n)
 
-        winners = np.zeros((n, 12), dtype=np.int64)
-        runners = np.zeros((n, 12), dtype=np.int64)
-        thirds_team = np.zeros((n, 12), dtype=np.int64)
-        thirds_pts = np.zeros((n, 12))
-        thirds_gd = np.zeros((n, 12))
-        thirds_gf = np.zeros((n, 12))
+        ng = len(self._groups)
+        winners = np.zeros((n, ng), dtype=np.int64)
+        runners = np.zeros((n, ng), dtype=np.int64)
+        thirds_team = np.zeros((n, ng), dtype=np.int64)
+        thirds_pts = np.zeros((n, ng))
+        thirds_gd = np.zeros((n, ng))
+        thirds_gf = np.zeros((n, ng))
 
-        for gi, letter in enumerate("ABCDEFGHIJKL"):
+        for gi, letter in enumerate(self._groups):
             info = self._group_layouts[letter]
             hg, ag = self._sample_group(letter)
             g_global = info["global"]
+            gsize = len(g_global)
             for j, (hl, al) in enumerate(info["layout"]):
                 team_goals[:, g_global[hl]] += hg[:, j]
                 team_goals[:, g_global[al]] += ag[:, j]
                 zero_zero += (hg[:, j] == 0) & (ag[:, j] == 0)
-            rand = self.rng.random((n, 4))
-            order, pts, gd, gf = rank_group(hg, ag, info["layout"], rand)
+            rand = self.rng.random((n, gsize))
+            order, pts, gd, gf = rank_group(hg, ag, info["layout"], rand, nteams=gsize)
             w_local, s_local, t_local = order[:, 0], order[:, 1], order[:, 2]
             winners[:, gi] = g_global[w_local]
             runners[:, gi] = g_global[s_local]
@@ -189,12 +209,17 @@ class TournamentSimulator:
             np.add.at(counts["group_second"], runners[:, gi], 1)
             np.add.at(counts["group_third"], thirds_team[:, gi], 1)
 
-        rand_thirds = self.rng.random((n, 12))
-        qualified, _order = select_best_thirds(thirds_pts, thirds_gd, thirds_gf, rand_thirds)
-        slot_group_idx, _mask = self.bracket.assign_thirds(qualified)
-        rows = np.arange(n)[:, None]
-        third_in_slot = thirds_team[rows, slot_group_idx]  # [N, n_slots]
-        slot_pos = {s: p for p, s in enumerate(self.bracket.third_slots)}
+        # Best third-placed teams only when the format sends thirds to the knockouts (WC2026).
+        third_in_slot = None
+        slot_pos: dict = {}
+        if self.bracket.third_slots:
+            rand_thirds = self.rng.random((n, ng))
+            qualified, _order = select_best_thirds(
+                thirds_pts, thirds_gd, thirds_gf, rand_thirds, k=len(self.bracket.third_slots)
+            )
+            slot_group_idx, _mask = self.bracket.assign_thirds(qualified)
+            third_in_slot = thirds_team[np.arange(n)[:, None], slot_group_idx]  # [N, n_slots]
+            slot_pos = {s: p for p, s in enumerate(self.bracket.third_slots)}
 
         def resolve_spec(spec) -> np.ndarray:
             kind, val = spec
@@ -206,16 +231,17 @@ class TournamentSimulator:
                 return third_in_slot[:, slot_pos[val]]
             raise ValueError(kind)
 
-        # Round of 32.
+        # First knockout round.
         match_winner: dict[str, np.ndarray] = {}
         match_loser: dict[str, np.ndarray] = {}
         opp_dist: dict[str, dict] = {}
-        r32_ids = sorted(self.bracket.map["r32"], key=int)
-        for num, (hspec, aspec) in zip(r32_ids, self.bracket.r32_specs):
+        first_reach = self._reach_metric(self.bracket.first_round_stage)
+        first_winner_metric = self._winner_metric(self.bracket.first_round_stage)
+        for num, (hspec, aspec) in zip(self.bracket.first_round_ids, self.bracket.first_round_specs):
             home = resolve_spec(hspec)
             away = resolve_spec(aspec)
-            np.add.at(counts["qualifies_r32"], home, 1)
-            np.add.at(counts["qualifies_r32"], away, 1)
+            np.add.at(counts[first_reach], home, 1)
+            np.add.at(counts[first_reach], away, 1)
             fid = f"M{num}"
             opp_dist[fid] = {"home": self._dist(home), "away": self._dist(away)}
             w, l, hg, ag = self._play(home, away, fid)
@@ -224,9 +250,9 @@ class TournamentSimulator:
             zero_zero += (hg == 0) & (ag == 0)
             match_winner[num] = w
             match_loser[num] = l
-            np.add.at(counts["reach_r16"], w, 1)
+            if first_winner_metric:
+                np.add.at(counts[first_winner_metric], w, 1)
 
-        stage_metric = {"R16": "reach_qf", "QF": "reach_sf", "SF": "reach_final", "FINAL": "wins_title"}
         for num, hspec, aspec, stage in self.bracket.progression:
             home = match_winner[hspec[1]] if hspec[0] == "WIN" else match_loser[hspec[1]]
             away = match_winner[aspec[1]] if aspec[0] == "WIN" else match_loser[aspec[1]]
@@ -236,8 +262,9 @@ class TournamentSimulator:
             zero_zero += (hg == 0) & (ag == 0)
             match_winner[num] = w
             match_loser[num] = l
-            if stage in stage_metric:
-                np.add.at(counts[stage_metric[stage]], w, 1)
+            metric = self._winner_metric(stage)
+            if metric:
+                np.add.at(counts[metric], w, 1)
 
         return self._aggregate(counts, opp_dist, team_goals, zero_zero)
 
@@ -254,7 +281,7 @@ class TournamentSimulator:
         advancement: dict[str, dict[str, float]] = {}
         max_se = 0.0
         for i, tid in enumerate(self.team_ids):
-            adv = {m: counts[m][i] / self.n for m in _ADV_METRICS}
+            adv = {m: counts[m][i] / self.n for m in self._adv_metrics}
             advancement[tid] = adv
             for p in adv.values():
                 max_se = max(max_se, (p * (1 - p) / self.n) ** 0.5)

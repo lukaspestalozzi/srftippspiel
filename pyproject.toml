@@ -25,7 +25,10 @@ tippspiel = "tippspiel.cli:main"
 include = ["tippspiel*"]
 
 [tool.setuptools.package-data]
-tippspiel = ["data/*.csv", "data/*.json", "report/templates/*.j2"]
+tippspiel = [
+    "data/tournaments/*/*.csv", "data/tournaments/*/*.json", "data/tournaments/*/*.yaml",
+    "report/templates/*.j2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

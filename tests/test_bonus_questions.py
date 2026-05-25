@@ -28,7 +28,7 @@ def _mode(dist):
 
 def test_swiss_progress_telescopes_and_sums_to_one():
     adv = {"SUI": {
-        "qualifies_r32": 0.8, "reach_r16": 0.5, "reach_qf": 0.3,
+        "reach_r32": 0.8, "reach_r16": 0.5, "reach_qf": 0.3,
         "reach_sf": 0.15, "reach_final": 0.06, "wins_title": 0.02,
     }}
     dist = SwissProgressBonus().resolve(_outcome(advancement=adv))

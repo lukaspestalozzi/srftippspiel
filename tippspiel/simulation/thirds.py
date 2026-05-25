@@ -14,20 +14,20 @@ _GD_OFFSET = 1000
 
 
 def select_best_thirds(
-    pts: np.ndarray, gd: np.ndarray, gf: np.ndarray, rand: np.ndarray
+    pts: np.ndarray, gd: np.ndarray, gf: np.ndarray, rand: np.ndarray, k: int = 8
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (qualified, order).
 
-    pts/gd/gf/rand are shape [N, 12] (one column per group A..L). ``qualified`` is a
-    boolean [N, 12] marking the 8 best third-placed groups per iteration; ``order`` is
-    [N, 12] group indices ranked best to worst. ``rand`` (uniform in [0,1)) breaks exact
-    (pts, gd, gf) ties deterministically — gaps between distinct keys are >= 1, so a
-    sub-1 perturbation only reorders genuine ties.
+    pts/gd/gf/rand are shape [N, ngroups] (one column per group). ``qualified`` is a boolean
+    [N, ngroups] marking the ``k`` best third-placed groups per iteration; ``order`` is
+    [N, ngroups] group indices ranked best to worst. ``rand`` (uniform in [0,1)) breaks exact
+    (pts, gd, gf) ties deterministically — gaps between distinct keys are >= 1, so a sub-1
+    perturbation only reorders genuine ties.
     """
     key = pts * 1e7 + (gd + _GD_OFFSET) * 1e3 + gf + rand
     order = np.argsort(-key, axis=1, kind="stable")
     n = pts.shape[0]
     qualified = np.zeros_like(pts, dtype=bool)
     rows = np.arange(n)[:, None]
-    qualified[rows, order[:, :8]] = True
+    qualified[rows, order[:, :k]] = True
     return qualified, order

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config
+from tippspiel.config import load_config, resolve_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import _predict_tippable, build_predictor, build_strategy
 from tippspiel.report.diagnostics import DiagnosticsWriter, build_diagnostics
@@ -17,22 +17,23 @@ REPO = Path(tippspiel.__file__).parent.parent
 
 def _load():
     cfg = load_config(REPO / "config.yaml")
-    prov = FileDataProvider(cfg.data.teams_file, cfg.data.fixtures_file,
-                            cfg.data.results_file, cfg.data.bracket_map_file)
+    bundle = resolve_tournament("wc2026")
+    prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file,
+                            bundle.results_file, bundle.bracket_map_file)
     teams = {t.team_id: t for t in prov.get_teams()}
-    return cfg, teams, prov.get_fixtures(), prov
+    return cfg, bundle, teams, prov.get_fixtures(), prov
 
 
 @pytest.fixture(scope="module")
 def diag():
-    cfg, teams, fixtures, prov = _load()
+    cfg, bundle, teams, fixtures, prov = _load()
     predictor = build_predictor(cfg)
-    strategy = build_strategy(cfg)
+    strategy = build_strategy(cfg, bundle)
     outcome = TournamentSimulator(fixtures, teams, {}, predictor, prov.get_bracket_map(),
                                   iterations=3000, seed=7).run()
     preds = _predict_tippable(fixtures, teams, set(), predictor)
     tipset = strategy.generate_tips(preds, outcome, fixtures)
-    md, data = build_diagnostics(cfg, teams, fixtures, {}, preds, tipset, outcome, predictor)
+    md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, outcome, predictor)
     return {"md": md, "data": data, "n_tippable": len(preds)}
 
 
@@ -65,7 +66,7 @@ def test_no_failing_anomaly_checks_on_default_data(diag):
     statuses = [a["status"] for a in diag["data"]["anomalies"]]
     assert "FAIL" not in statuses
     # The sim invariants must be present and passing.
-    assert {"Sum(wins_title) ~ 1", "Sum(qualifies_r32) ~ 32"} <= {a["name"] for a in diag["data"]["anomalies"]}
+    assert {"Sum(wins_title) ~ 1", "Sum(reach_r32) is integer"} <= {a["name"] for a in diag["data"]["anomalies"]}
 
 
 def test_json_sidecar_round_trips(diag, tmp_path):
@@ -76,12 +77,12 @@ def test_json_sidecar_round_trips(diag, tmp_path):
 
 
 def test_no_sim_mode_degrades_gracefully():
-    cfg, teams, fixtures, _ = _load()
+    cfg, bundle, teams, fixtures, _ = _load()
     predictor = build_predictor(cfg)
-    strategy = build_strategy(cfg)
+    strategy = build_strategy(cfg, bundle)
     preds = _predict_tippable(fixtures, teams, set(), predictor)
     tipset = strategy.generate_tips(preds, None, fixtures)
-    md, data = build_diagnostics(cfg, teams, fixtures, {}, preds, tipset, None, predictor)
+    md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, None, predictor)
     assert data["simulation"] is None
     assert "Simulation skipped" in md
     bonus = {b["id"]: b for b in data["bonus"]}

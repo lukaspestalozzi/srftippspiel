@@ -1,8 +1,6 @@
-data:
-  teams_file: tippspiel/data/teams.csv
-  fixtures_file: tippspiel/data/fixtures.csv
-  results_file: tippspiel/data/results.csv
-  bracket_map_file: tippspiel/data/r32_bracket_map.json
+# Which tournament bundle to use by default (tippspiel/data/tournaments/<name>/).
+# Override on the CLI with --tournament <name>.
+tournament: wc2026
 
 predictor:
   name: elo_poisson
@@ -25,9 +23,5 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
-bonus_questions:
-  - { id: champion, points: 50 }
-  - { id: swiss_progress, points: 20 }    # how far Switzerland advances
-  - { id: swiss_goals, points: 20 }        # total goals Switzerland scores (120-min)
-  - { id: top_scorer_goals, points: 20 }   # Golden Boot tally (fixed historical prior)
-  - { id: zero_zero_count, points: 20 }    # number of 0:0 matches (result after 120 min)
+# Bonus questions are tournament-specific and now live in each tournament bundle's
+# tournament.yaml (e.g. tippspiel/data/tournaments/wc2026/tournament.yaml).

@@ -55,6 +55,26 @@ def expected_points(dist: ScorelineDistribution, th: int, ta: int, weight: int) 
     return ev_components(dist, th, ta, weight)["total"]
 
 
+def _sign(x: int) -> int:
+    return (x > 0) - (x < 0)
+
+
+def score_tip(th: int, ta: int, actual_h: int, actual_a: int, weight: int) -> int:
+    """Pool points a tip (th, ta) scores against a known result, under the same 5/1/1/3 rules
+    used by ``ev_components`` (exact score = 10*W). The deterministic counterpart to the EV;
+    knockout results should be the 120-minute scoreline (shootouts count as draws)."""
+    pts = 0
+    if _sign(th - ta) == _sign(actual_h - actual_a):
+        pts += PTS_TENDENCY
+    if th == actual_h:
+        pts += PTS_HOME_GOALS
+    if ta == actual_a:
+        pts += PTS_AWAY_GOALS
+    if (th - ta) == (actual_h - actual_a):
+        pts += PTS_GOAL_DIFF
+    return weight * pts
+
+
 def best_tip(dist: ScorelineDistribution, weight: int) -> tuple[int, int, float]:
     """Enumerate all (th, ta) in [0, gmax]^2, return the EV-maximising tip.
 

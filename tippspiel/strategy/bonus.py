@@ -62,7 +62,7 @@ class SwissProgressBonus(BonusQuestion):
         a = outcome.advancement.get(self.team_id)
         if not a:
             return {}
-        q = a.get("qualifies_r32", 0.0)
+        q = a.get("reach_r32", 0.0)
         r16 = a.get("reach_r16", 0.0)
         qf = a.get("reach_qf", 0.0)
         sf = a.get("reach_sf", 0.0)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .config import Config
+from .config import Config, TournamentBundle
 from .data.file_provider import FileDataProvider
 from .model.types import Match, MatchPrediction, Result, Team, TournamentOutcome
 from .predictors.base import Predictor
@@ -30,9 +30,9 @@ def build_predictor(cfg: Config) -> Predictor:
     raise ValueError(f"Unknown predictor: {cfg.predictor.name}")
 
 
-def build_strategy(cfg: Config) -> TipStrategy:
+def build_strategy(cfg: Config, bundle: TournamentBundle) -> TipStrategy:
     if cfg.strategy.name == "expected_points":
-        return ExpectedPointsStrategy(bonus_question_configs=cfg.bonus_questions)
+        return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
     raise ValueError(f"Unknown strategy: {cfg.strategy.name}")
 
 
@@ -51,17 +51,17 @@ def _predict_tippable(
     return preds
 
 
-def _run_core(cfg: Config, *, simulate: bool) -> dict:
+def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     """Load data, predict, optionally simulate, and generate tips.
 
     Returns the raw objects shared by the HTML report and the diagnostic report, so neither
     path has to rebuild them (and the diagnostic path can skip the expensive Plotly context).
     """
     provider = FileDataProvider(
-        cfg.data.teams_file,
-        cfg.data.fixtures_file,
-        cfg.data.results_file,
-        cfg.data.bracket_map_file,
+        bundle.teams_file,
+        bundle.fixtures_file,
+        bundle.results_file,
+        bundle.bracket_map_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
@@ -69,7 +69,7 @@ def _run_core(cfg: Config, *, simulate: bool) -> dict:
     played = set(results)
 
     predictor = build_predictor(cfg)
-    strategy = build_strategy(cfg)
+    strategy = build_strategy(cfg, bundle)
 
     outcome: TournamentOutcome | None = None
     if simulate:
@@ -99,32 +99,49 @@ def _run_core(cfg: Config, *, simulate: bool) -> dict:
 
 def run_pipeline(
     cfg: Config,
+    bundle: TournamentBundle,
     *,
     simulate: bool,
 ) -> dict:
-    core = _run_core(cfg, simulate=simulate)
+    core = _run_core(cfg, bundle, simulate=simulate)
     context = _build_report_context(
-        cfg, core["teams"], core["fixtures"], core["results"],
+        cfg, bundle, core["teams"], core["fixtures"], core["results"],
         core["predictions"], core["tipset"], core["outcome"], core["predictor"],
     )
     return {"context": context, "tipset": core["tipset"], "outcome": core["outcome"]}
 
 
-def write_diagnostics(cfg: Config, *, simulate: bool) -> dict:
+def write_diagnostics(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     """Run the core pipeline and write the Claude diagnostic report (markdown + JSON)."""
     from .report.diagnostics import DiagnosticsWriter, build_diagnostics
 
-    core = _run_core(cfg, simulate=simulate)
+    core = _run_core(cfg, bundle, simulate=simulate)
     markdown, data = build_diagnostics(
-        cfg, core["teams"], core["fixtures"], core["results"],
+        cfg, bundle, core["teams"], core["fixtures"], core["results"],
         core["predictions"], core["tipset"], core["outcome"], core["predictor"],
     )
     paths = DiagnosticsWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
 
 
+def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
+    """Backtest the predictor against a completed tournament; write output/verify.{md,json}."""
+    from .report.backtest import VerificationWriter, build_verification
+
+    provider = FileDataProvider(
+        bundle.teams_file, bundle.fixtures_file, bundle.results_file, bundle.bracket_map_file,
+    )
+    teams = {t.team_id: t for t in provider.get_teams()}
+    fixtures = provider.get_fixtures()
+    results = {r.match_id: r for r in provider.get_results()}
+    predictor = build_predictor(cfg)
+    markdown, data = build_verification(bundle, teams, fixtures, results, predictor)
+    paths = VerificationWriter().write(markdown, data, cfg.report.output_dir)
+    return {"paths": paths, "data": data}
+
+
 def _build_report_context(
-    cfg, teams, fixtures, results, predictions, tipset, outcome, predictor
+    cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor
 ) -> dict:
     groups = _group_sections(teams, fixtures, results, predictions, tipset, outcome)
     knockout_fixtures = _knockout_sections(teams, fixtures, results, predictions, tipset, outcome)
@@ -140,7 +157,7 @@ def _build_report_context(
         )[:20]
         title_odds_chart = charts.title_odds_bar(title_rows)
         bracket_html = _bracket_chart(teams, outcome)
-        bonus = _bonus_sections(cfg, teams, tipset, outcome)
+        bonus = _bonus_sections(bundle, teams, tipset, outcome)
 
     header = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -240,23 +257,24 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome) -
 
 
 def _bracket_chart(teams, outcome):
-    top = sorted(outcome.advancement.items(), key=lambda kv: kv[1]["wins_title"], reverse=True)[:10]
-    rows = []
-    for tid, a in top:
-        rows.append({
-            "team": teams[tid].name,
-            "probs": [a["qualifies_r32"], a["reach_r16"], a["reach_qf"],
-                      a["reach_sf"], a["reach_final"], a["wins_title"]],
-        })
-    return charts.bracket_progression(rows)
+    # Reach-metric keys appear in the advancement dict in stage order (group placements first,
+    # then reach_<stage> per knockout round). Derive them so any format renders correctly.
+    sample = next(iter(outcome.advancement.values()))
+    reach_keys = [k for k in sample if k.startswith("reach_")]
+    keys = reach_keys + ["wins_title"]
+    labels = ["Reach " + k[len("reach_"):].upper() for k in reach_keys] + ["Champion"]
+    top = sorted(outcome.advancement.items(),
+                 key=lambda kv: kv[1].get("wins_title", 0.0), reverse=True)[:10]
+    rows = [{"team": teams[tid].name, "probs": [a.get(k, 0.0) for k in keys]} for tid, a in top]
+    return charts.bracket_progression(rows, labels)
 
 
-def _bonus_sections(cfg, teams, tipset, outcome) -> list[dict]:
+def _bonus_sections(bundle, teams, tipset, outcome) -> list[dict]:
     def name_of(key):
         return teams[key].name if key in teams else key
 
     out = []
-    for q in build_bonus_questions(cfg.bonus_questions):
+    for q in build_bonus_questions(bundle.bonus_questions):
         dist = q.resolve(outcome)
         if not dist:
             continue

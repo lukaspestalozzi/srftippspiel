@@ -54,23 +54,37 @@ def _match_slots(group_letters: tuple[str, ...], allowed_by_slot: dict[int, set[
 class Bracket:
     def __init__(self, bracket_map: dict) -> None:
         self.map = bracket_map
-        self.third_slots: list[int] = list(bracket_map["_meta"]["third_place_slots"])
+        self.third_slots: list[int] = list(bracket_map["_meta"].get("third_place_slots", []))
         self.allowed_by_slot: dict[int, set[str]] = {}
-        self.r32_specs: list[tuple] = []  # 16 entries: (home_spec, away_spec)
-        for mid in sorted(bracket_map["r32"], key=int):
-            slot = bracket_map["r32"][mid]
-            self.r32_specs.append((self._spec(slot["home"]), self._spec(slot["away"])))
+        # First knockout round (R32 for WC2026, QF for a 16-team tournament, etc.).
+        first = bracket_map["first_round"]
+        self.first_round_stage: str = first["stage"]
+        self.first_round_ids: list[str] = sorted(first["slots"], key=int)
+        self.first_round_specs: list[tuple] = []  # (home_spec, away_spec) per first-round match
+        for mid in self.first_round_ids:
+            slot = first["slots"][mid]
+            self.first_round_specs.append((self._spec(slot["home"]), self._spec(slot["away"])))
             for side in ("home", "away"):
                 ref = slot[side]
                 if ref["type"] == "third":
                     self.allowed_by_slot[ref["slot"]] = set(ref["allowed_groups"])
-        # Progression matches 89..104, in order.
+        # Progression matches (later knockout rounds), in order.
         self.progression: list[tuple] = []
         for mid in sorted(bracket_map["progression"], key=int):
             p = bracket_map["progression"][mid]
             self.progression.append((mid, self._spec(p["home"]), self._spec(p["away"]), p["stage"]))
+        # Ordered advancement chain: first-round stage, then each later stage in order of
+        # appearance, excluding the third-place consolation. e.g. [R32, R16, QF, SF, FINAL]
+        # for WC2026; [QF, SF, FINAL] for Women's Euro 2025.
+        chain = [self.first_round_stage]
+        for _mid, _h, _a, stage in self.progression:
+            if stage != "THIRD_PLACE" and stage not in chain:
+                chain.append(stage)
+        self.stage_chain: list[str] = chain
         self._explicit = bracket_map.get("third_place_allocation", {})
-        self._table = self._build_table()
+        # The third-place combination table is only needed when some groups send a third-placed
+        # team to the knockouts (WC2026); skipped entirely otherwise.
+        self._table = self._build_table() if self.third_slots else {}
 
     @staticmethod
     def _spec(ref: dict):

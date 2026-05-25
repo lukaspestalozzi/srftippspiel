@@ -1,0 +1,18 @@
+name: wc2026
+display_name: FIFA World Cup 2026
+completed: false        # tournament not yet played; results.csv is conditioned on as it fills
+
+teams_file: teams.csv
+fixtures_file: fixtures.csv
+results_file: results.csv
+bracket_map_file: bracket_map.json
+
+elo_source: "eloratings.net snapshot (men); some playoff slots provisional (see README)"
+
+# Bonus questions are tournament-specific (SRF pool, Swiss-focused, German labels).
+bonus_questions:
+  - { id: champion, points: 50 }
+  - { id: swiss_progress, points: 20 }    # how far Switzerland advances
+  - { id: swiss_goals, points: 20 }        # total goals Switzerland scores (120-min)
+  - { id: top_scorer_goals, points: 20 }   # Golden Boot tally (fixed historical prior)
+  - { id: zero_zero_count, points: 20 }    # number of 0:0 matches (result after 120 min)

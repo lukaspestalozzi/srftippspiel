@@ -9,7 +9,7 @@ import pytest
 import tippspiel
 from tippspiel.simulation.bracket import Bracket, _match_slots
 
-BRACKET_FILE = Path(tippspiel.__file__).parent / "data" / "r32_bracket_map.json"
+BRACKET_FILE = Path(tippspiel.__file__).parent / "data" / "tournaments" / "wc2026" / "bracket_map.json"
 
 
 @pytest.fixture
@@ -18,7 +18,9 @@ def bracket() -> Bracket:
 
 
 def test_structure(bracket: Bracket):
-    assert len(bracket.r32_specs) == 16
+    assert len(bracket.first_round_specs) == 16
+    assert bracket.first_round_stage == "R32"
+    assert bracket.stage_chain == ["R32", "R16", "QF", "SF", "FINAL"]
     assert bracket.third_slots == [74, 77, 79, 80, 81, 82, 85, 87]
     assert len(bracket.progression) == 16  # matches 89..104
 
