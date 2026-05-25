@@ -110,6 +110,7 @@ def _build_report_context(
             reverse=True,
         )[:20]
         title_odds_chart = charts.title_odds_bar(title_rows)
+        bracket_html = _bracket_chart(teams, outcome)
         bonus = _bonus_sections(cfg, teams, tipset, outcome)
 
     header = {
@@ -207,6 +208,18 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome) -
                            "played": False, "tip": None, "slot_note": note,
                            "occupants_chart": None})
     return blocks
+
+
+def _bracket_chart(teams, outcome):
+    top = sorted(outcome.advancement.items(), key=lambda kv: kv[1]["wins_title"], reverse=True)[:10]
+    rows = []
+    for tid, a in top:
+        rows.append({
+            "team": teams[tid].name,
+            "probs": [a["qualifies_r32"], a["reach_r16"], a["reach_qf"],
+                      a["reach_sf"], a["reach_final"], a["wins_title"]],
+        })
+    return charts.bracket_progression(rows)
 
 
 def _bonus_sections(cfg, teams, tipset, outcome) -> list[dict]:

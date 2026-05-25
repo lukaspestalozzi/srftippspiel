@@ -153,6 +153,34 @@ def title_odds_bar(rows: list[tuple[str, float]]) -> str:
     return _fig_to_div(fig)
 
 
+def bracket_progression(rows: list[dict]) -> str:
+    """Round-by-round reach probabilities for the leading teams (spec §6.7.2 item 6).
+
+    rows: [{team, probs: [qualify, r16, qf, sf, final, title]}], one line per team.
+    A clean static diagram of how far each contender is likely to advance.
+    """
+    rounds = ["Qualify R32", "Reach R16", "Reach QF", "Reach SF", "Reach Final", "Champion"]
+    fig = go.Figure()
+    for r in rows:
+        fig.add_trace(
+            go.Scatter(
+                x=rounds,
+                y=r["probs"],
+                mode="lines+markers",
+                name=r["team"],
+                hovertemplate=r["team"] + " — %{x}: %{y:.1%}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        height=460,
+        margin=dict(l=50, r=10, t=30, b=40),
+        title="Advancement by round (leading teams)",
+        yaxis=dict(range=[0, 1], tickformat=".0%", title="probability"),
+        legend=dict(orientation="v"),
+    )
+    return _fig_to_div(fig)
+
+
 def bonus_candidates_bar(question: str, rows: list[tuple[str, float]]) -> str:
     rows = sorted(rows, key=lambda r: r[1])[-8:]
     fig = go.Figure(
