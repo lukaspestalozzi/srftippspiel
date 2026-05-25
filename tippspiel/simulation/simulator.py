@@ -149,12 +149,16 @@ class TournamentSimulator:
                 pen_home = self.rng.random(self.n) < 0.5
             winner = np.where(home_win, home, np.where(away_win, away, np.where(pen_home, home, away)))
         loser = np.where(winner == home, away, home)
-        return winner, loser
+        return winner, loser, hg, ag
 
     # ----- run -----------------------------------------------------------------
     def run(self) -> TournamentOutcome:
         n, nt = self.n, self.nteams
         counts = {m: np.zeros(nt) for m in _ADV_METRICS}
+        # Per-iteration tallies for the Swiss-goals and 0:0-count bonus questions.
+        team_goals = np.zeros((n, nt), dtype=np.int64)
+        zero_zero = np.zeros(n, dtype=np.int64)
+        it = np.arange(n)
 
         winners = np.zeros((n, 12), dtype=np.int64)
         runners = np.zeros((n, 12), dtype=np.int64)
@@ -166,9 +170,13 @@ class TournamentSimulator:
         for gi, letter in enumerate("ABCDEFGHIJKL"):
             info = self._group_layouts[letter]
             hg, ag = self._sample_group(letter)
+            g_global = info["global"]
+            for j, (hl, al) in enumerate(info["layout"]):
+                team_goals[:, g_global[hl]] += hg[:, j]
+                team_goals[:, g_global[al]] += ag[:, j]
+                zero_zero += (hg[:, j] == 0) & (ag[:, j] == 0)
             rand = self.rng.random((n, 4))
             order, pts, gd, gf = rank_group(hg, ag, info["layout"], rand)
-            g_global = info["global"]
             w_local, s_local, t_local = order[:, 0], order[:, 1], order[:, 2]
             winners[:, gi] = g_global[w_local]
             runners[:, gi] = g_global[s_local]
@@ -210,7 +218,10 @@ class TournamentSimulator:
             np.add.at(counts["qualifies_r32"], away, 1)
             fid = f"M{num}"
             opp_dist[fid] = {"home": self._dist(home), "away": self._dist(away)}
-            w, l = self._play(home, away, fid)
+            w, l, hg, ag = self._play(home, away, fid)
+            np.add.at(team_goals, (it, home), hg)
+            np.add.at(team_goals, (it, away), ag)
+            zero_zero += (hg == 0) & (ag == 0)
             match_winner[num] = w
             match_loser[num] = l
             np.add.at(counts["reach_r16"], w, 1)
@@ -219,19 +230,27 @@ class TournamentSimulator:
         for num, hspec, aspec, stage in self.bracket.progression:
             home = match_winner[hspec[1]] if hspec[0] == "WIN" else match_loser[hspec[1]]
             away = match_winner[aspec[1]] if aspec[0] == "WIN" else match_loser[aspec[1]]
-            w, l = self._play(home, away, f"M{num}")
+            w, l, hg, ag = self._play(home, away, f"M{num}")
+            np.add.at(team_goals, (it, home), hg)
+            np.add.at(team_goals, (it, away), ag)
+            zero_zero += (hg == 0) & (ag == 0)
             match_winner[num] = w
             match_loser[num] = l
             if stage in stage_metric:
                 np.add.at(counts[stage_metric[stage]], w, 1)
 
-        return self._aggregate(counts, opp_dist)
+        return self._aggregate(counts, opp_dist, team_goals, zero_zero)
 
     def _dist(self, team_arr: np.ndarray) -> dict[str, float]:
         vals, cnt = np.unique(team_arr, return_counts=True)
         return {self.team_ids[int(v)]: float(c) / self.n for v, c in zip(vals, cnt)}
 
-    def _aggregate(self, counts, opp_dist) -> TournamentOutcome:
+    def _count_dist(self, arr: np.ndarray) -> dict[str, float]:
+        """Distribution over integer counts (keyed by the stringified count)."""
+        vals, cnt = np.unique(arr, return_counts=True)
+        return {str(int(v)): float(c) / self.n for v, c in zip(vals, cnt)}
+
+    def _aggregate(self, counts, opp_dist, team_goals, zero_zero) -> TournamentOutcome:
         advancement: dict[str, dict[str, float]] = {}
         max_se = 0.0
         for i, tid in enumerate(self.team_ids):
@@ -241,6 +260,10 @@ class TournamentSimulator:
                 max_se = max(max_se, (p * (1 - p) / self.n) ** 0.5)
         champ = {tid: advancement[tid]["wins_title"] for tid in self.team_ids
                  if advancement[tid]["wins_title"] > 0}
+        team_goal_distribution = {
+            tid: self._count_dist(team_goals[:, i])
+            for i, tid in enumerate(self.team_ids)
+        }
         return TournamentOutcome(
             advancement=advancement,
             opponent_distribution=opp_dist,
@@ -248,4 +271,6 @@ class TournamentSimulator:
             mc_iterations=self.n,
             mc_seed=self.seed,
             mc_standard_error=max_se,
+            team_goal_distribution=team_goal_distribution,
+            zero_zero_distribution=self._count_dist(zero_zero),
         )

@@ -12,6 +12,7 @@ from .predictors.elo_poisson import EloPoissonPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
 from .strategy.base import TipStrategy
+from .strategy.bonus import build_bonus_questions
 from .strategy.expected_points import ExpectedPointsStrategy, expected_points
 
 CAVEATS = (
@@ -223,24 +224,26 @@ def _bracket_chart(teams, outcome):
 
 
 def _bonus_sections(cfg, teams, tipset, outcome) -> list[dict]:
+    def name_of(key):
+        return teams[key].name if key in teams else key
+
     out = []
-    for q_cfg in cfg.bonus_questions:
-        dist = outcome.bonus_probabilities.get(q_cfg.id)
+    for q in build_bonus_questions(cfg.bonus_questions):
+        dist = q.resolve(outcome)
         if not dist:
             continue
         ranked = sorted(dist.items(), key=lambda kv: kv[1], reverse=True)
-        top_id, top_p = ranked[0]
+        top_key, top_p = ranked[0]
         runner = ranked[1] if len(ranked) > 1 else (None, 0.0)
-        rows = [(teams[t].name if t in teams else t, p) for t, p in ranked[:8]]
+        rows = [(name_of(k), p) for k, p in ranked[:8]]
         out.append({
-            "question": f"World Champion" if q_cfg.id == "champion" else q_cfg.id,
-            "points": q_cfg.points,
-            "answer": teams[top_id].name if top_id in teams else top_id,
+            "question": q.label or q.question_id,
+            "points": q.points,
+            "answer": name_of(top_key),
             "prob": top_p,
-            "runner_up": (teams[runner[0]].name if runner[0] in teams else runner[0]) if runner[0] else None,
+            "runner_up": name_of(runner[0]) if runner[0] is not None else None,
             "runner_up_prob": runner[1],
-            "chart": charts.bonus_candidates_bar(
-                "Champion candidates" if q_cfg.id == "champion" else q_cfg.id, rows),
+            "chart": charts.bonus_candidates_bar(q.label or q.question_id, rows),
         })
     return out
 

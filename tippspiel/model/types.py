@@ -108,3 +108,8 @@ class TournamentOutcome:
     mc_iterations: int
     mc_seed: int
     mc_standard_error: float
+    # team_id -> {goal_count (as str): probability} of total goals scored over the tournament
+    # (120-minute scorelines only; penalty-shootout goals excluded).
+    team_goal_distribution: dict[str, dict[str, float]] = field(default_factory=dict)
+    # goal-count (as str) -> probability of that many 0:0 matches across all 104 fixtures.
+    zero_zero_distribution: dict[str, float] = field(default_factory=dict)

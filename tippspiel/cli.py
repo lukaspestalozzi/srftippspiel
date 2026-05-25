@@ -34,11 +34,13 @@ def _cmd_run(cfg) -> int:
     outcome = result["outcome"]
     print(f"Predicted {len(tips)} tippable fixture(s).")
     if outcome is not None:
-        champ = result["tipset"].bonus_answers.get("champion")
         print(f"Monte Carlo: {outcome.mc_iterations:,} iterations (seed {outcome.mc_seed}), "
               f"max SE {outcome.mc_standard_error:.4f}.")
-        if champ:
-            print(f"Recommended World Champion: {champ}")
+        answers = result["tipset"].bonus_answers
+        if answers:
+            print("Recommended bonus answers:")
+            for qid, ans in answers.items():
+                print(f"  {qid}: {ans}")
     print(f"Report written to {path}")
     return 0
 

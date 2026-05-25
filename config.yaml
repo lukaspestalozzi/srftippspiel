@@ -27,4 +27,7 @@ report:
 
 bonus_questions:
   - { id: champion, points: 50 }
-  # further questions added here once defined by Q
+  - { id: swiss_progress, points: 20 }    # how far Switzerland advances
+  - { id: swiss_goals, points: 20 }        # total goals Switzerland scores (120-min)
+  - { id: top_scorer_goals, points: 20 }   # Golden Boot tally (fixed historical prior)
+  - { id: zero_zero_count, points: 20 }    # number of 0:0 matches (result after 120 min)
