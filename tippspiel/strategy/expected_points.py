@@ -28,20 +28,31 @@ from .base import TipStrategy
 from .bonus import build_bonus_questions
 
 
-def expected_points(dist: ScorelineDistribution, th: int, ta: int, weight: int) -> float:
+def ev_components(dist: ScorelineDistribution, th: int, ta: int, weight: int) -> dict[str, float]:
+    """Expected pool points for tip (th, ta), broken into the four additive scoring terms.
+
+    Returns ``{tendency, home_goals, away_goals, goal_diff, total}`` (each already weighted).
+    ``expected_points`` is the ``total``; the breakdown is what the diagnostic report uses to
+    show *why* a given tip wins (e.g. the 5-pt tendency term dominating).
+    """
     if th > ta:
         p_tendency = dist.p_home_win()
     elif th == ta:
         p_tendency = dist.p_draw()
     else:
         p_tendency = dist.p_away_win()
-    base = (
-        PTS_TENDENCY * p_tendency
-        + PTS_HOME_GOALS * dist.p_home_goals(th)
-        + PTS_AWAY_GOALS * dist.p_away_goals(ta)
-        + PTS_GOAL_DIFF * dist.p_goal_difference(th - ta)
-    )
-    return weight * base
+    comps = {
+        "tendency": weight * PTS_TENDENCY * p_tendency,
+        "home_goals": weight * PTS_HOME_GOALS * dist.p_home_goals(th),
+        "away_goals": weight * PTS_AWAY_GOALS * dist.p_away_goals(ta),
+        "goal_diff": weight * PTS_GOAL_DIFF * dist.p_goal_difference(th - ta),
+    }
+    comps["total"] = comps["tendency"] + comps["home_goals"] + comps["away_goals"] + comps["goal_diff"]
+    return comps
+
+
+def expected_points(dist: ScorelineDistribution, th: int, ta: int, weight: int) -> float:
+    return ev_components(dist, th, ta, weight)["total"]
 
 
 def best_tip(dist: ScorelineDistribution, weight: int) -> tuple[int, int, float]:

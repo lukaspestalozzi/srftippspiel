@@ -51,11 +51,12 @@ def _predict_tippable(
     return preds
 
 
-def run_pipeline(
-    cfg: Config,
-    *,
-    simulate: bool,
-) -> dict:
+def _run_core(cfg: Config, *, simulate: bool) -> dict:
+    """Load data, predict, optionally simulate, and generate tips.
+
+    Returns the raw objects shared by the HTML report and the diagnostic report, so neither
+    path has to rebuild them (and the diagnostic path can skip the expensive Plotly context).
+    """
     provider = FileDataProvider(
         cfg.data.teams_file,
         cfg.data.fixtures_file,
@@ -89,10 +90,37 @@ def run_pipeline(
     predictions = _predict_tippable(fixtures, teams, played, predictor)
     tipset = strategy.generate_tips(predictions, outcome, fixtures)
 
+    return {
+        "teams": teams, "fixtures": fixtures, "results": results,
+        "predictions": predictions, "tipset": tipset, "outcome": outcome,
+        "predictor": predictor,
+    }
+
+
+def run_pipeline(
+    cfg: Config,
+    *,
+    simulate: bool,
+) -> dict:
+    core = _run_core(cfg, simulate=simulate)
     context = _build_report_context(
-        cfg, teams, fixtures, results, predictions, tipset, outcome, predictor
+        cfg, core["teams"], core["fixtures"], core["results"],
+        core["predictions"], core["tipset"], core["outcome"], core["predictor"],
     )
-    return {"context": context, "tipset": tipset, "outcome": outcome}
+    return {"context": context, "tipset": core["tipset"], "outcome": core["outcome"]}
+
+
+def write_diagnostics(cfg: Config, *, simulate: bool) -> dict:
+    """Run the core pipeline and write the Claude diagnostic report (markdown + JSON)."""
+    from .report.diagnostics import DiagnosticsWriter, build_diagnostics
+
+    core = _run_core(cfg, simulate=simulate)
+    markdown, data = build_diagnostics(
+        cfg, core["teams"], core["fixtures"], core["results"],
+        core["predictions"], core["tipset"], core["outcome"], core["predictor"],
+    )
+    paths = DiagnosticsWriter().write(markdown, data, cfg.report.output_dir)
+    return {"paths": paths, "data": data}
 
 
 def _build_report_context(

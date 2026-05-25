@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import load_config
 from .data.file_provider import FileDataProvider
-from .pipeline import run_pipeline, write_report
+from .pipeline import run_pipeline, write_diagnostics, write_report
 
 DEFAULT_CONFIG = "config.yaml"
 
@@ -42,6 +42,20 @@ def _cmd_run(cfg) -> int:
             for qid, ans in answers.items():
                 print(f"  {qid}: {ans}")
     print(f"Report written to {path}")
+    return 0
+
+
+def _cmd_diagnose(cfg, *, simulate: bool) -> int:
+    result = write_diagnostics(cfg, simulate=simulate)
+    paths = result["paths"]
+    anomalies = result["data"]["anomalies"]
+    n_fail = sum(1 for a in anomalies if a["status"] == "FAIL")
+    n_warn = sum(1 for a in anomalies if a["status"] == "WARN")
+    print(f"Diagnostic report written to {paths['markdown']} (+ {paths['json'].name}).")
+    print(f"Anomaly checks: {len(anomalies)} total, {n_fail} FAIL, {n_warn} WARN.")
+    for a in anomalies:
+        if a["status"] in ("FAIL", "WARN"):
+            print(f"  [{a['status']}] {a['name']}: {a['detail']}")
     return 0
 
 
@@ -135,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
         ("validate-data", "check input files for errors"),
     ]:
         _add_config_arg(sub.add_parser(name, help=help_text), with_default=False)
+    diag = sub.add_parser("diagnose", help="write the Claude diagnostic report (markdown + JSON)")
+    _add_config_arg(diag, with_default=False)
+    diag.add_argument("--no-sim", action="store_true",
+                      help="skip Monte Carlo (fast, predictor-only diagnostics)")
     args = parser.parse_args(argv)
     config_path = args.config  # always set: top-level default or a subcommand override
 
@@ -149,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_run(cfg)
     if args.command == "validate-data":
         return _cmd_validate(cfg)
+    if args.command == "diagnose":
+        return _cmd_diagnose(cfg, simulate=not args.no_sim)
     return 2
 
 
