@@ -111,18 +111,23 @@ def validate_data(cfg) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="tippspiel")
-    parser.add_argument("--config", default=DEFAULT_CONFIG, help="path to config.yaml")
+    # --config is accepted both before and after the subcommand. SUPPRESS keeps the
+    # subparser from overwriting a value supplied at the top level.
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument("--config", default=argparse.SUPPRESS, help="path to config.yaml")
+    parser = argparse.ArgumentParser(prog="tippspiel", parents=[parent])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("run", help="full pipeline: predict, simulate, report")
-    sub.add_parser("predict", help="group-stage predictions + tips only (no simulation)")
-    sub.add_parser("validate-data", help="check input files for errors")
+    sub.add_parser("run", parents=[parent], help="full pipeline: predict, simulate, report")
+    sub.add_parser("predict", parents=[parent],
+                   help="group-stage predictions + tips only (no simulation)")
+    sub.add_parser("validate-data", parents=[parent], help="check input files for errors")
     args = parser.parse_args(argv)
+    config_path = getattr(args, "config", DEFAULT_CONFIG)
 
-    if not Path(args.config).exists():
-        print(f"Config not found: {args.config}", file=sys.stderr)
+    if not Path(config_path).exists():
+        print(f"Config not found: {config_path}", file=sys.stderr)
         return 2
-    cfg = load_config(args.config)
+    cfg = load_config(config_path)
 
     if args.command == "predict":
         return _cmd_predict(cfg)
