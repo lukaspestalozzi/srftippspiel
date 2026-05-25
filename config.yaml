@@ -1,0 +1,30 @@
+data:
+  teams_file: tippspiel/data/teams.csv
+  fixtures_file: tippspiel/data/fixtures.csv
+  results_file: tippspiel/data/results.csv
+  bracket_map_file: tippspiel/data/r32_bracket_map.json
+
+predictor:
+  name: elo_poisson
+  params:
+    mu: 2.6
+    k: 0.0015
+    gmax: 7
+    rho: 0.0            # Dixon-Coles low-score correction; 0 = off
+    host_elo_bonus: 0   # Elo-equivalent bonus, applied only at host-nation venues
+
+strategy:
+  name: expected_points
+
+simulation:
+  iterations: 50000
+  seed: 20260611
+  penalty_model: coin_flip   # coin_flip | elo_weighted
+
+report:
+  output_dir: output/
+  display_timezone: Europe/Zurich
+
+bonus_questions:
+  - { id: champion, points: 50 }
+  # further questions added here once defined by Q
