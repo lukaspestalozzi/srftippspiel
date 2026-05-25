@@ -110,19 +110,31 @@ def validate_data(cfg) -> list[str]:
     return errors
 
 
+def _add_config_arg(parser: argparse.ArgumentParser, *, with_default: bool) -> None:
+    # Top-level carries the real default (so `tippspiel run` works with a local
+    # config.yaml and the default shows in --help). The subcommand copy uses SUPPRESS so
+    # that, when --config is given before the subcommand, the subparser does not overwrite
+    # it with the default. Either position works; a value after the subcommand wins.
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        default=(DEFAULT_CONFIG if with_default else argparse.SUPPRESS),
+        help=f"path to config file (default: {DEFAULT_CONFIG} in the current directory)",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    # --config is accepted both before and after the subcommand. SUPPRESS keeps the
-    # subparser from overwriting a value supplied at the top level.
-    parent = argparse.ArgumentParser(add_help=False)
-    parent.add_argument("--config", default=argparse.SUPPRESS, help="path to config.yaml")
-    parser = argparse.ArgumentParser(prog="tippspiel", parents=[parent])
+    parser = argparse.ArgumentParser(prog="tippspiel")
+    _add_config_arg(parser, with_default=True)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("run", parents=[parent], help="full pipeline: predict, simulate, report")
-    sub.add_parser("predict", parents=[parent],
-                   help="group-stage predictions + tips only (no simulation)")
-    sub.add_parser("validate-data", parents=[parent], help="check input files for errors")
+    for name, help_text in [
+        ("run", "full pipeline: predict, simulate, report"),
+        ("predict", "group-stage predictions + tips only (no simulation)"),
+        ("validate-data", "check input files for errors"),
+    ]:
+        _add_config_arg(sub.add_parser(name, help=help_text), with_default=False)
     args = parser.parse_args(argv)
-    config_path = getattr(args, "config", DEFAULT_CONFIG)
+    config_path = args.config  # always set: top-level default or a subcommand override
 
     if not Path(config_path).exists():
         print(f"Config not found: {config_path}", file=sys.stderr)
