@@ -21,10 +21,23 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-  report:
-    name: Generate report
+  artifacts:
+    name: ${{ matrix.command }}
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - command: validate-data
+            artifact: validate-data-log
+            path: output/validate-data.log
+          - command: predict
+            artifact: predict-report
+            path: output/report.html
+          - command: run
+            artifact: run-report
+            path: output/report.html
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,11 +47,13 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install
         run: pip install -e ".[dev]"
-      - name: Run pipeline
-        run: tippspiel run --config config.yaml
-      - name: Upload report
+      - name: Run tippspiel ${{ matrix.command }}
+        run: |
+          mkdir -p output
+          tippspiel ${{ matrix.command }} | tee "output/${{ matrix.command }}.log"
+      - name: Upload ${{ matrix.artifact }}
         uses: actions/upload-artifact@v4
         with:
-          name: tippspiel-report
-          path: output/report.html
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
           if-no-files-found: error
