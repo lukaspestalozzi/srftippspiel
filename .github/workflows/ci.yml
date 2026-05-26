@@ -22,22 +22,43 @@ jobs:
         run: pytest -q
 
   artifacts:
-    name: ${{ matrix.command }}
+    name: ${{ matrix.name }}
     needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - command: validate-data
+          # Default config (config.yaml = FIFA World Cup 2026) unless --config is given.
+          - name: validate-data
+            args: validate-data
             artifact: validate-data-log
             path: output/validate-data.log
-          - command: predict
+          - name: predict
+            args: predict
             artifact: predict-report
             path: output/report.html
-          - command: run
+          - name: run
+            args: run
             artifact: run-report
             path: output/report.html
+          - name: diagnose
+            args: diagnose
+            artifact: diagnose-report
+            path: output/diagnostic.md
+          # Predictor-accuracy backtest against a completed tournament.
+          - name: verify-womenseuro2025
+            args: verify --config configs/womenseuro2025.yaml
+            artifact: verify-womenseuro2025
+            path: output/verify.md
+          - name: verify-wc2022
+            args: verify --config configs/wc2022.yaml
+            artifact: verify-wc2022
+            path: output/verify.md
+          - name: verify-euro2024
+            args: verify --config configs/euro2024.yaml
+            artifact: verify-euro2024
+            path: output/verify.md
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,10 +68,10 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install
         run: pip install -e ".[dev]"
-      - name: Run tippspiel ${{ matrix.command }}
+      - name: Run tippspiel ${{ matrix.args }}
         run: |
           mkdir -p output
-          tippspiel ${{ matrix.command }} | tee "output/${{ matrix.command }}.log"
+          tippspiel ${{ matrix.args }} | tee "output/${{ matrix.name }}.log"
       - name: Upload ${{ matrix.artifact }}
         uses: actions/upload-artifact@v4
         with:

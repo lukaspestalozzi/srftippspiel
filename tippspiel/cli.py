@@ -217,16 +217,20 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    if args.command == "predict":
-        return _cmd_predict(cfg, bundle)
-    if args.command == "run":
-        return _cmd_run(cfg, bundle)
-    if args.command == "verify":
-        return _cmd_verify(cfg, bundle)
-    if args.command == "validate-data":
-        return _cmd_validate(cfg, bundle)
-    if args.command == "diagnose":
-        return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
+    try:
+        if args.command == "predict":
+            return _cmd_predict(cfg, bundle)
+        if args.command == "run":
+            return _cmd_run(cfg, bundle)
+        if args.command == "verify":
+            return _cmd_verify(cfg, bundle)
+        if args.command == "validate-data":
+            return _cmd_validate(cfg, bundle)
+        if args.command == "diagnose":
+            return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
+    except ValueError as exc:
+        print(f"{args.command}: {exc}", file=sys.stderr)
+        return 1
     return 2
 
 

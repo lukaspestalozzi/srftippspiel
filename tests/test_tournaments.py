@@ -18,6 +18,12 @@ from tippspiel.simulation.bracket import Bracket
 REPO = Path(tippspiel.__file__).parent.parent
 WC2026 = REPO / "config.yaml"
 WOMENSEURO = REPO / "configs" / "womenseuro2025.yaml"
+ALL_CONFIGS = [
+    WC2026,
+    WOMENSEURO,
+    REPO / "configs" / "wc2022.yaml",
+    REPO / "configs" / "euro2024.yaml",
+]
 
 
 def _provider(bundle):
@@ -35,9 +41,9 @@ def test_missing_file_raises():
         load_tournament(REPO / "configs" / "does_not_exist.yaml")
 
 
-def test_validate_data_passes_for_both_tournaments():
-    assert validate_data(load_tournament(WC2026)) == []
-    assert validate_data(load_tournament(WOMENSEURO)) == []
+@pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda p: p.stem)
+def test_validate_data_passes_for_all_tournaments(config):
+    assert validate_data(load_tournament(config)) == []
 
 
 def test_womenseuro_format_is_16_teams_no_thirds_qf_first():

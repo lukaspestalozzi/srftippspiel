@@ -75,6 +75,14 @@ class Bracket:
         self.group_letters = list(group_letters)
         self._gidx = {g: i for i, g in enumerate(self.group_letters)}
 
+        concrete = [m.match_id for m in ko_matches if not (m.home.ko_ref and m.away.ko_ref)]
+        if concrete:
+            raise ValueError(
+                "knockout fixtures must use structured references (W:/R:/3RD:/WIN:/LOSE:) to "
+                f"be simulated; {concrete[:3]} list concrete teams. A completed tournament's "
+                "bracket is fixed — use `tippspiel verify` instead of `run`/`diagnose`."
+            )
+
         first_matches: list[Match] = []
         prog_matches: list[Match] = []
         for m in ko_matches:
