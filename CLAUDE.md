@@ -22,6 +22,7 @@ tippspiel run               # full pipeline + output/report.html (pool-facing)
 tippspiel diagnose          # the Claude diagnostic report (see below) -> output/diagnostic.{md,json}
 tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
 tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
+tippspiel tune              # sweep predictor params vs the completed-tournament backtests -> output/tune.{md,json}
 ```
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
@@ -50,9 +51,19 @@ over each slot's allowed groups is used (`tippspiel/simulation/bracket.py`).
 `tippspiel verify --config configs/<completed>.yaml` is the **predictor-accuracy backtest**: it
 predicts every actual match a-priori from the pre-tournament Elo snapshot, tips it, and totals the
 pool points scored vs the actual results (with the naive most-likely tip as a baseline, and the
-per-match max). `womenseuro2025`, `wc2022` and `euro2024` are the seeded benchmarks; the model
-beats the naive baseline overall. Code: `tippspiel/report/backtest.py`; scoring helper `score_tip`
-in `strategy/expected_points.py`.
+per-match max). It also reports **calibration** (mean tendency RPS + scoreline NLL).
+`womenseuro2025`, `wc2022` and `euro2024` are the seeded benchmarks; the model beats the naive
+baseline on all three. Code: `tippspiel/report/backtest.py`; scoring helper `score_tip` in
+`strategy/expected_points.py`.
+
+`tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
+`ko_goal_scale`) over the completed-tournament backtests and writes a leaderboard
+(`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
+tie-break on pool-points % of max; it also reports a leave-one-tournament-out generalisation
+check. The current `config.yaml` params are the tuned result. Code: `tippspiel/report/tuning.py`.
+Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
+goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
+advantage applies when a team plays in its own country (`venue_country == home.team_id`).
 
 ## The diagnostic report — my primary analysis tool
 

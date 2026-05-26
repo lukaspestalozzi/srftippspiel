@@ -5,12 +5,13 @@
 
 predictor:
   name: elo_poisson
-  params:
+  params:        # tuned via `tippspiel tune` (see config.yaml)
     mu: 2.6
-    k: 0.0015
+    k: 0.002
     gmax: 7
-    rho: 0.0
-    host_elo_bonus: 0
+    rho: -0.1
+    host_elo_bonus: 40
+    ko_goal_scale: 1.2
 
 strategy:
   name: expected_points

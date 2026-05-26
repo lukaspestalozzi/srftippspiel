@@ -29,7 +29,8 @@ Requires Python 3.11+. Dependencies: numpy, plotly, jinja2, pyyaml (+ pytest for
 tippspiel validate-data           # check input files for schema/consistency errors
 tippspiel predict                 # group-stage predictions + tips only (Phase 1, no sim)
 tippspiel run                     # full pipeline: predict + 50k simulations + report
-tippspiel verify                  # backtest the predictor on a completed tournament (pool points)
+tippspiel verify                  # backtest the predictor on a completed tournament (pool points + calibration)
+tippspiel tune                    # sweep predictor params vs the completed-tournament backtests
 tippspiel run --config configs/womenseuro2025.yaml   # run for a different tournament
 ```
 
@@ -51,14 +52,24 @@ data folder + a config file.
 `tippspiel verify --config configs/<completed>.yaml` backtests predictor accuracy: it tips every
 actual match a-priori from the pre-tournament Elo snapshot and totals the **pool points** the
 tips would have scored against the real results, against a naive most-likely-scoreline baseline
-and the per-match maximum. `womenseuro2025`, `wc2022` and `euro2024` ship as seeded benchmarks;
-the model beats the naive baseline. Output: `output/verify.{md,json}`.
+and the per-match maximum, plus **calibration** (tendency RPS + scoreline NLL). `womenseuro2025`,
+`wc2022` and `euro2024` ship as seeded benchmarks; the model beats the naive baseline on all
+three. Output: `output/verify.{md,json}`.
+
+`tippspiel tune` sweeps the predictor parameters (`mu`, `k`, `rho`, `host_elo_bonus`,
+`ko_goal_scale`) over those benchmarks and writes a leaderboard (`output/tune.{md,json}`),
+ranking by calibration with pool points as the tie-break, plus a leave-one-tournament-out
+generalisation check. The shipped config parameters are the tuned result.
 
 ## Configuration
 
 Each tournament config file holds the model parameters, MC iterations + seed, display
 timezone and bonus questions, plus the `tournament:` block. The MC seed is mandatory and
-surfaced in the report: same seed + same inputs ⇒ identical output.
+surfaced in the report: same seed + same inputs ⇒ identical output. The predictor params were
+**tuned** via `tippspiel tune`: `k` (Elo→goal-rate sensitivity), `rho` (Dixon-Coles low-score
+correction; negative lifts draws over 1:0/0:1), `host_elo_bonus` (applied when a team plays in
+its own country), and `ko_goal_scale` (knockout goal-rate multiplier, since knockout results
+are the 120-minute scoreline).
 
 ## Scoring rules implemented
 

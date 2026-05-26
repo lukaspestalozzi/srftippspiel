@@ -1,0 +1,215 @@
+"""Parameter tuning: sweep EloPoisson params against the completed-tournament backtests.
+
+Ranks candidate parameter sets by calibration (mean RPS over the pooled matches), tie-broken
+by pool-points % of max — the "blended" objective: calibration first, points as the
+tie-break. Reuses ``build_verification`` for per-tournament scoring + calibration, aggregates
+across all benchmark tournaments, and reports a leaderboard, the recommended set, and a
+leave-one-tournament-out generalisation check. Writes ``output/tune.{md,json}``.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+from pathlib import Path
+
+from ..predictors.elo_poisson import EloPoissonPredictor
+from .backtest import build_verification
+from .diagnostics import _fixed_table, _json_default
+
+# Coarse default sweep grid. gmax is fixed (truncation, not a behaviour lever).
+DEFAULT_GRID: dict[str, list] = {
+    "mu": [2.4, 2.6, 2.8, 3.0, 3.2],
+    "k": [0.0010, 0.0015, 0.0020, 0.0025],
+    "rho": [-0.10, -0.05, 0.0, 0.05],
+    "host_elo_bonus": [0, 40, 80],
+    "ko_goal_scale": [1.0, 1.1, 1.2, 1.33],
+}
+_GMAX = 7
+_TUNED_KEYS = ("mu", "k", "rho", "host_elo_bonus", "ko_goal_scale")
+
+
+def _iter_grid(grid: dict[str, list]):
+    keys = list(grid)
+    for combo in itertools.product(*(grid[k] for k in keys)):
+        yield dict(zip(keys, combo))
+
+
+def _default_params(base_cfg) -> dict:
+    p = getattr(base_cfg.predictor, "params", {}) if base_cfg else {}
+    return {
+        "mu": p.get("mu", 2.6),
+        "k": p.get("k", 0.0015),
+        "rho": p.get("rho", 0.0),
+        "host_elo_bonus": p.get("host_elo_bonus", 0.0),
+        "ko_goal_scale": p.get("ko_goal_scale", 1.0),
+    }
+
+
+def _evaluate(params: dict, benchmarks: list) -> dict:
+    """Aggregate pool points + calibration across all benchmark tournaments for one param set.
+
+    ``benchmarks``: list of ``(bundle, teams, fixtures, results)``.
+    """
+    predictor = EloPoissonPredictor(gmax=_GMAX, **params)
+    n = model = naive = mx = exact = 0
+    rps_sum = nll_sum = 0.0
+    per_tournament: dict[str, dict] = {}
+    for bundle, teams, fixtures, results in benchmarks:
+        _md, data = build_verification(bundle, teams, fixtures, results, predictor)
+        s = data["summary"]["all"]
+        c = data["calibration"]["all"]
+        n += s["matches"]
+        model += s["model"]
+        naive += s["naive"]
+        mx += s["max"]
+        exact += s["exact_hits"]
+        rps_sum += c["mean_rps"] * c["matches"]
+        nll_sum += c["mean_nll"] * c["matches"]
+        per_tournament[bundle.name] = {
+            "matches": s["matches"],
+            "model": s["model"],
+            "naive": s["naive"],
+            "max": s["max"],
+            "model_pct": (100.0 * s["model"] / s["max"]) if s["max"] else 0.0,
+            "mean_rps": c["mean_rps"],
+            "mean_nll": c["mean_nll"],
+        }
+    return {
+        "params": params,
+        "matches": n,
+        "model": model,
+        "naive": naive,
+        "max": mx,
+        "exact_hits": exact,
+        "model_pct": (100.0 * model / mx) if mx else 0.0,
+        "mean_rps": rps_sum / n if n else 0.0,
+        "mean_nll": nll_sum / n if n else 0.0,
+        "per_tournament": per_tournament,
+    }
+
+
+def _blended_key(result: dict):
+    """Calibration-primary, pool-points tie-break: lower RPS first, then higher points %."""
+    return (round(result["mean_rps"], 4), -result["model_pct"])
+
+
+def _leave_one_out(results: list, names: list[str]) -> dict:
+    """For each tournament, pick the best params on the *other* tournaments and report how it
+    scores on the held-out one — a guard against overfitting only three events."""
+    out: dict[str, dict] = {}
+    for held in names:
+        others = [t for t in names if t != held]
+
+        def train_key(r, others=others):
+            tot_m = sum(r["per_tournament"][t]["matches"] for t in others)
+            rps = sum(r["per_tournament"][t]["mean_rps"] * r["per_tournament"][t]["matches"]
+                      for t in others) / tot_m if tot_m else 0.0
+            tot_max = sum(r["per_tournament"][t]["max"] for t in others)
+            pct = (100.0 * sum(r["per_tournament"][t]["model"] for t in others) / tot_max
+                   if tot_max else 0.0)
+            return (round(rps, 4), -pct)
+
+        chosen = min(results, key=train_key)
+        held_metrics = chosen["per_tournament"][held]
+        out[held] = {
+            "chosen_params": chosen["params"],
+            "heldout_mean_rps": held_metrics["mean_rps"],
+            "heldout_model_pct": held_metrics["model_pct"],
+        }
+    return out
+
+
+def build_tuning(base_cfg, benchmarks: list, grid: dict | None = None,
+                 top: int = 15) -> tuple[str, dict]:
+    grid = grid or DEFAULT_GRID
+    candidates = list(_iter_grid(grid))
+    default = _default_params(base_cfg)
+    if default not in candidates:
+        candidates.append(default)
+
+    results = [_evaluate(p, benchmarks) for p in candidates]
+    ranked = sorted(results, key=_blended_key)
+    recommended = ranked[0]
+    default_result = next(r for r in results if r["params"] == default)
+    names = [b[0].name for b in benchmarks]
+
+    data = {
+        "benchmarks": names,
+        "grid_size": len(candidates),
+        "default_params": default,
+        "default_metrics": _metrics_only(default_result),
+        "recommended_params": recommended["params"],
+        "recommended_metrics": _metrics_only(recommended),
+        "recommended_per_tournament": recommended["per_tournament"],
+        "leaderboard": [_row(r) for r in ranked[:top]],
+        "leave_one_out": _leave_one_out(results, names),
+    }
+    return _render(data), data
+
+
+def _metrics_only(r: dict) -> dict:
+    return {k: r[k] for k in ("matches", "model", "naive", "max", "model_pct",
+                              "exact_hits", "mean_rps", "mean_nll")}
+
+
+def _row(r: dict) -> dict:
+    return {"params": r["params"], **_metrics_only(r)}
+
+
+def _fmt_params(p: dict) -> str:
+    return (f"mu{p['mu']} k{p['k']} rho{p['rho']} "
+            f"host{int(p['host_elo_bonus'])} ko{p['ko_goal_scale']}")
+
+
+def _render(data: dict) -> str:
+    L = ["# Parameter tuning — blended (calibration-primary, pool-points tie-break)", ""]
+    L.append(f"Benchmarks: {', '.join(data['benchmarks'])}. "
+             f"Swept {data['grid_size']} parameter sets; ranked by mean RPS (lower better), "
+             f"tie-broken by model pool-points % of max.")
+    L.append("")
+    d, r = data["default_metrics"], data["recommended_metrics"]
+    L.append("## Default vs recommended")
+    L.append(_fixed_table(
+        ["set", "mu/k/rho/host/ko", "mean RPS", "mean NLL", "model", "%max", "exact"],
+        [
+            ["default", _fmt_params(data["default_params"]), f"{d['mean_rps']:.4f}",
+             f"{d['mean_nll']:.4f}", d["model"], f"{d['model_pct']:.1f}", d["exact_hits"]],
+            ["recommend", _fmt_params(data["recommended_params"]), f"{r['mean_rps']:.4f}",
+             f"{r['mean_nll']:.4f}", r["model"], f"{r['model_pct']:.1f}", r["exact_hits"]],
+        ],
+    ))
+    L.append("")
+    L.append("## Recommended — per tournament")
+    prows = [[name, m["matches"], f"{m['mean_rps']:.4f}", m["model"], m["naive"], m["max"],
+              f"{m['model_pct']:.1f}"]
+             for name, m in data["recommended_per_tournament"].items()]
+    L.append(_fixed_table(["tournament", "matches", "mean RPS", "model", "naive", "max", "%max"],
+                          prows))
+    L.append("")
+    L.append("## Leaderboard (top by blended rank)")
+    lrows = [[i + 1, _fmt_params(row["params"]), f"{row['mean_rps']:.4f}",
+              f"{row['mean_nll']:.4f}", row["model"], f"{row['model_pct']:.1f}", row["exact_hits"]]
+             for i, row in enumerate(data["leaderboard"])]
+    L.append(_fixed_table(
+        ["#", "mu/k/rho/host/ko", "mean RPS", "mean NLL", "model", "%max", "exact"], lrows))
+    L.append("")
+    L.append("## Leave-one-tournament-out (generalisation check)")
+    L.append("Params chosen on the other two tournaments, scored on the held-out one.")
+    orows = [[held, _fmt_params(v["chosen_params"]), f"{v['heldout_mean_rps']:.4f}",
+              f"{v['heldout_model_pct']:.1f}"]
+             for held, v in data["leave_one_out"].items()]
+    L.append(_fixed_table(["held-out", "chosen params", "heldout RPS", "heldout %max"], orows))
+    L.append("")
+    return "\n".join(L)
+
+
+class TuningWriter:
+    def write(self, markdown: str, data: dict, output_dir: str | Path) -> dict[str, Path]:
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        md_path = out_dir / "tune.md"
+        json_path = out_dir / "tune.json"
+        md_path.write_text(markdown, encoding="utf-8")
+        json_path.write_text(json.dumps(data, indent=2, default=_json_default), encoding="utf-8")
+        return {"markdown": md_path, "json": json_path}

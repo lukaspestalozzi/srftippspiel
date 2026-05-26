@@ -10,11 +10,40 @@ most-likely scoreline is scored too as a baseline, and the per-match maximum (an
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
+from ..model.scoreline import ScorelineDistribution
 from ..model.stages import PTS_EXACT
 from ..strategy.expected_points import best_tip, expected_points, score_tip
 from .diagnostics import _fixed_table, _json_default
+
+_NLL_EPS = 1e-12
+
+
+def _tendency_rps(dist: ScorelineDistribution, actual_h: int, actual_a: int) -> float:
+    """Ranked probability score over the ordered outcomes (home win, draw, away win).
+
+    RPS = 0.5 * sum over the 2 cumulative thresholds of (cum_pred - cum_obs)^2; 0 is perfect,
+    1 is worst. The standard, outlier-robust football tendency-calibration metric.
+    """
+    preds = [dist.p_home_win(), dist.p_draw(), dist.p_away_win()]
+    obs_idx = 0 if actual_h > actual_a else (1 if actual_h == actual_a else 2)
+    obs = [1.0 if i == obs_idx else 0.0 for i in range(3)]
+    cp = co = 0.0
+    total = 0.0
+    for i in range(2):  # 2 cumulative thresholds for 3 ordered categories
+        cp += preds[i]
+        co += obs[i]
+        total += (cp - co) ** 2
+    return 0.5 * total
+
+
+def _scoreline_nll(dist: ScorelineDistribution, actual_h: int, actual_a: int) -> float:
+    """Negative log-likelihood of the actual scoreline (goals clamped to the grid)."""
+    h = min(actual_h, dist.gmax)
+    a = min(actual_a, dist.gmax)
+    return -math.log(max(dist.cell(h, a), _NLL_EPS))
 
 
 def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str, dict]:
@@ -44,6 +73,8 @@ def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str
             "naive_pts": naive_pts,
             "max_pts": max_pts,
             "exact_hit": (mh, ma) == (actual.home_goals, actual.away_goals),
+            "rps": _tendency_rps(dist, actual.home_goals, actual.away_goals),
+            "nll": _scoreline_nll(dist, actual.home_goals, actual.away_goals),
         })
 
     by_stage_kind = {"group": [], "knockout": []}
@@ -59,10 +90,25 @@ def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str
             "exact_hits": sum(1 for r in rows if r["exact_hit"]),
         }
 
+    def calib(rows):
+        n = len(rows)
+        if n == 0:
+            return {"matches": 0, "mean_rps": 0.0, "mean_nll": 0.0}
+        return {
+            "matches": n,
+            "mean_rps": sum(r["rps"] for r in rows) / n,
+            "mean_nll": sum(r["nll"] for r in rows) / n,
+        }
+
     summary = {
         "all": totals(records),
         "group": totals(by_stage_kind["group"]),
         "knockout": totals(by_stage_kind["knockout"]),
+    }
+    calibration = {
+        "all": calib(records),
+        "group": calib(by_stage_kind["group"]),
+        "knockout": calib(by_stage_kind["knockout"]),
     }
     data = {
         "tournament": bundle.display_name,
@@ -70,6 +116,7 @@ def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str
         "predictor_params": getattr(predictor, "params", {}),
         "elo_source": bundle.elo_source,
         "summary": summary,
+        "calibration": calibration,
         "matches": records,
     }
     return _render(bundle, data), data
@@ -100,6 +147,15 @@ def _render(bundle, data) -> str:
         rows,
     ))
     L.append("")
+    cal = data.get("calibration", {})
+    if cal:
+        L.append("## Calibration")
+        L.append("Lower is better. RPS = ranked-probability score on the tendency (0 perfect, "
+                 "1 worst); NLL = mean negative log-likelihood of the actual scoreline.")
+        crows = [[key, cal[key]["matches"], f"{cal[key]['mean_rps']:.4f}",
+                  f"{cal[key]['mean_nll']:.4f}"] for key in ("all", "group", "knockout")]
+        L.append(_fixed_table(["split", "matches", "mean RPS", "mean NLL"], crows))
+        L.append("")
     L.append("## Per-match")
     L.append("pts columns are model / naive / max pool points for that match.")
     mrows = []

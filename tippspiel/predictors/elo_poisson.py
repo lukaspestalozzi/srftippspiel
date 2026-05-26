@@ -40,12 +40,14 @@ class EloPoissonPredictor(Predictor):
         gmax: int = 7,
         rho: float = 0.0,
         host_elo_bonus: float = 0.0,
+        ko_goal_scale: float = 1.0,
     ) -> None:
         self.mu = mu
         self.k = k
         self.gmax = gmax
         self.rho = rho
         self.host_elo_bonus = host_elo_bonus
+        self.ko_goal_scale = ko_goal_scale
 
     @property
     def params(self) -> dict:
@@ -55,6 +57,7 @@ class EloPoissonPredictor(Predictor):
             "gmax": self.gmax,
             "rho": self.rho,
             "host_elo_bonus": self.host_elo_bonus,
+            "ko_goal_scale": self.ko_goal_scale,
         }
 
     def goal_rates(
@@ -82,10 +85,16 @@ class EloPoissonPredictor(Predictor):
             )
         home = teams[match.home.team_id]
         away = teams[match.away.team_id]
+        # A team is "host" when it plays in its own country (general across tournaments).
         home_is_host = (
-            match.venue_country is not None and match.venue_country == _host_of(home)
+            match.venue_country is not None and match.venue_country == home.team_id
         )
         lambda_h, lambda_a = self.goal_rates(home.elo, away.elo, home_is_host)
+        if match.stage.is_knockout:
+            # Knockout results are recorded as the 120-minute scoreline (extra time included),
+            # but the goal rates model ~90 minutes; scale up to match.
+            lambda_h *= self.ko_goal_scale
+            lambda_a *= self.ko_goal_scale
         matrix = self.scoreline_matrix(lambda_h, lambda_a)
         return MatchPrediction(
             match_id=match.match_id,
@@ -93,14 +102,6 @@ class EloPoissonPredictor(Predictor):
             predictor_name=self.name,
             predictor_params=self.params,
         )
-
-
-# Mapping from host team_id to its venue country code (spec §3.1 host-nation rule).
-_HOST_TEAM_TO_COUNTRY = {"USA": "USA", "CAN": "CAN", "MEX": "MEX"}
-
-
-def _host_of(team: Team) -> str | None:
-    return _HOST_TEAM_TO_COUNTRY.get(team.team_id)
 
 
 def _apply_dixon_coles(

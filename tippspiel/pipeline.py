@@ -140,6 +140,24 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
     return {"paths": paths, "data": data}
 
 
+def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None) -> dict:
+    """Sweep predictor params against completed-tournament backtests; write output/tune.{md,json}."""
+    from .config import load_tournament
+    from .report.tuning import TuningWriter, build_tuning
+
+    benchmarks = []
+    for cfg_path in benchmark_configs:
+        bundle = load_tournament(cfg_path)
+        provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+        teams = {t.team_id: t for t in provider.get_teams()}
+        fixtures = provider.get_fixtures()
+        results = {r.match_id: r for r in provider.get_results()}
+        benchmarks.append((bundle, teams, fixtures, results))
+    markdown, data = build_tuning(base_cfg, benchmarks, grid=grid, top=top)
+    paths = TuningWriter().write(markdown, data, base_cfg.report.output_dir)
+    return {"paths": paths, "data": data}
+
+
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor
 ) -> dict:

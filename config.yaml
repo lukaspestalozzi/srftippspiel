@@ -3,12 +3,16 @@
 
 predictor:
   name: elo_poisson
+  # Tuned against the completed-tournament backtests via `tippspiel tune` (blended
+  # calibration + pool-points objective): sharper favourites (k), a negative Dixon-Coles
+  # term that lifts draws over 1:0/0:1 (rho), and a knockout goal-scale for the 120-min results.
   params:
     mu: 2.6
-    k: 0.0015
+    k: 0.002
     gmax: 7
-    rho: 0.0            # Dixon-Coles low-score correction; 0 = off
-    host_elo_bonus: 0   # Elo-equivalent bonus, applied only at host-nation venues
+    rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
+    host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
+    ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
 
 strategy:
   name: expected_points

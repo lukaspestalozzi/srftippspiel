@@ -5,10 +5,13 @@ from pathlib import Path
 import pytest
 
 import tippspiel
+import numpy as np
+
 from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
+from tippspiel.model.scoreline import ScorelineDistribution
 from tippspiel.pipeline import build_predictor
-from tippspiel.report.backtest import build_verification
+from tippspiel.report.backtest import _scoreline_nll, _tendency_rps, build_verification
 from tippspiel.strategy.expected_points import score_tip
 
 REPO = Path(tippspiel.__file__).parent.parent
@@ -58,6 +61,35 @@ _BENCHMARKS = [
     (REPO / "configs" / "wc2022.yaml", 64, 16),     # 48 group + 16 knockout
     (REPO / "configs" / "euro2024.yaml", 51, 15),   # 36 group + 15 knockout (no 3rd-place game)
 ]
+
+
+def _dist(cells: dict, gmax: int = 7) -> ScorelineDistribution:
+    m = np.zeros((gmax + 1, gmax + 1))
+    for (h, a), p in cells.items():
+        m[h, a] = p
+    return ScorelineDistribution(m)
+
+
+def test_calibration_metrics_reward_being_right():
+    # RPS: a confident-correct tendency beats a flat one; a confident-wrong one is worst.
+    home_win = {(2, 0): 1.0}
+    flat = {(2, 0): 1 / 3, (1, 1): 1 / 3, (0, 2): 1 / 3}
+    assert _tendency_rps(_dist(home_win), 2, 0) == pytest.approx(0.0)
+    assert _tendency_rps(_dist(home_win), 0, 2) == pytest.approx(1.0)  # confident & wrong
+    assert _tendency_rps(_dist(flat), 2, 0) < _tendency_rps(_dist(home_win), 0, 2)
+    # NLL: more mass on the actual scoreline -> lower NLL.
+    sharp = _dist({(2, 0): 0.8, (1, 0): 0.2})
+    diffuse = _dist({(2, 0): 0.2, (1, 0): 0.8})
+    assert _scoreline_nll(sharp, 2, 0) < _scoreline_nll(diffuse, 2, 0)
+
+
+def test_verify_reports_calibration_block():
+    _md, data = _verify(WOMENSEURO_CONFIG)
+    cal = data["calibration"]
+    assert set(cal) == {"all", "group", "knockout"}
+    assert 0.0 <= cal["all"]["mean_rps"] <= 1.0
+    assert cal["all"]["mean_nll"] > 0.0
+    assert cal["group"]["matches"] + cal["knockout"]["matches"] == cal["all"]["matches"]
 
 
 @pytest.mark.parametrize("config,n_matches,n_ko", _BENCHMARKS, ids=lambda v: getattr(v, "stem", v))

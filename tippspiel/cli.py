@@ -18,10 +18,21 @@ from pathlib import Path
 
 from .config import load_config, load_tournament
 from .data.file_provider import FileDataProvider
-from .pipeline import run_pipeline, write_diagnostics, write_report, write_verification
+from .pipeline import (
+    run_pipeline,
+    run_tuning,
+    write_diagnostics,
+    write_report,
+    write_verification,
+)
 from .simulation.bracket import Bracket
 
 DEFAULT_CONFIG = "config.yaml"
+DEFAULT_BENCHMARKS = [
+    "configs/womenseuro2025.yaml",
+    "configs/wc2022.yaml",
+    "configs/euro2024.yaml",
+]
 
 
 def _cmd_predict(cfg, bundle) -> int:
@@ -79,6 +90,26 @@ def _cmd_verify(cfg, bundle) -> int:
           f"(+ {paths['json'].name}).")
     print(f"Model {s['model']} pts vs naive {s['naive']} pts over {s['matches']} matches "
           f"(max {s['max']}, {pct:.1f}% of max, {s['exact_hits']} exact hits).")
+    return 0
+
+
+def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
+    missing = [p for p in benchmark_configs if not Path(p).exists()]
+    if missing:
+        print(f"tune: benchmark config(s) not found: {missing}", file=sys.stderr)
+        return 2
+    result = run_tuning(cfg, benchmark_configs, top=top)
+    paths, data = result["paths"], result["data"]
+    dm, rm = data["default_metrics"], data["recommended_metrics"]
+    print(f"tuning written to {paths['markdown']} (+ {paths['json'].name}).")
+    print(f"benchmarks: {', '.join(data['benchmarks'])}; swept {data['grid_size']} param sets.")
+    print(f"default:     RPS {dm['mean_rps']:.4f}  model {dm['model']} pts "
+          f"({dm['model_pct']:.1f}% of max)")
+    print(f"recommended: RPS {rm['mean_rps']:.4f}  model {rm['model']} pts "
+          f"({rm['model_pct']:.1f}% of max)")
+    print("recommended params:")
+    for key, val in data["recommended_params"].items():
+        print(f"  {key}: {val}")
     return 0
 
 
@@ -204,6 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_common_args(diag, with_default=False)
     diag.add_argument("--no-sim", action="store_true",
                       help="skip Monte Carlo (fast, predictor-only diagnostics)")
+    tune = sub.add_parser("tune", help="sweep predictor params against completed-tournament backtests")
+    _add_common_args(tune, with_default=False)
+    tune.add_argument("--benchmarks", metavar="PATH", nargs="+", default=DEFAULT_BENCHMARKS,
+                      help="completed-tournament config files to tune against "
+                           f"(default: {', '.join(DEFAULT_BENCHMARKS)})")
+    tune.add_argument("--top", type=int, default=15, help="leaderboard size (default: 15)")
     args = parser.parse_args(argv)
 
     config_path = args.config
@@ -228,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_validate(cfg, bundle)
         if args.command == "diagnose":
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
+        if args.command == "tune":
+            return _cmd_tune(cfg, args.benchmarks, args.top)
     except ValueError as exc:
         print(f"{args.command}: {exc}", file=sys.stderr)
         return 1
