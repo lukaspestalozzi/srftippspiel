@@ -33,6 +33,23 @@ def build_predictor(cfg: Config) -> Predictor:
 def build_strategy(cfg: Config, bundle: TournamentBundle) -> TipStrategy:
     if cfg.strategy.name == "expected_points":
         return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
+    if cfg.strategy.name == "rank_optimizing":
+        from .strategy.rank_optimizing import PredictorDerivedFieldModel, RankOptimizingStrategy
+
+        p = cfg.strategy.params
+        field_model = PredictorDerivedFieldModel(
+            expert_fraction=p.get("expert_fraction", 0.6),
+            temperature=p.get("temperature", 1.5),
+        )
+        return RankOptimizingStrategy(
+            field_model=field_model,
+            pool_size=p.get("pool_size", 200_000),
+            top_n=p.get("top_n", 1),
+            n_worlds=p.get("n_worlds", 10_000),
+            candidates_per_match=p.get("candidates_per_match", 6),
+            seed=cfg.simulation.seed,
+            bonus_question_configs=bundle.bonus_questions,
+        )
     raise ValueError(f"Unknown strategy: {cfg.strategy.name}")
 
 
