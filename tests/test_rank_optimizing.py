@@ -148,6 +148,17 @@ def test_integration_through_pipeline_on_wc2026_groups():
         assert 0 <= tip.tip_home <= g and 0 <= tip.tip_away <= g
 
 
+def test_cli_strategy_override():
+    from tippspiel.cli import _override_strategy
+
+    cfg = load_config(REPO / "config.yaml")
+    assert cfg.strategy.name == "expected_points"
+    assert _override_strategy(cfg, None) is cfg          # no-op
+    overridden = _override_strategy(cfg, "rank_optimizing")
+    assert overridden.strategy.name == "rank_optimizing"
+    assert cfg.strategy.name == "expected_points"        # original unchanged (frozen)
+
+
 def test_build_strategy_dispatches_rank_optimizing():
     cfg = load_config(REPO / "config.yaml")
     bundle = load_tournament(REPO / "config.yaml")

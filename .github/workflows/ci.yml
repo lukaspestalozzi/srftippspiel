@@ -43,6 +43,11 @@ jobs:
             args: run
             artifact: run-report
             path: output/report.html
+          # Rank-optimising strategy: tips that aim to WIN the pool by anticipating the field.
+          - name: run-rankopt
+            args: run --strategy rank_optimizing
+            artifact: run-rankopt-report
+            path: output/report.html
           - name: diagnose
             args: diagnose
             artifact: diagnose-report
