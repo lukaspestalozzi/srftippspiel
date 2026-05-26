@@ -1,9 +1,11 @@
 """Config loading + validation.
 
-Global engine defaults (predictor / strategy / simulation / report) live in ``config.yaml``.
-Tournament-specific data + bonus questions live in per-tournament bundles under
-``tippspiel/data/tournaments/<name>/tournament.yaml`` and are loaded via ``resolve_tournament``.
-The seed is mandatory and surfaced in the report for reproducibility.
+Each tournament is one self-contained config file (``config.yaml`` is the default,
+FIFA World Cup 2026; further tournaments live under ``configs/<name>.yaml``). A config file
+carries both the engine defaults (predictor / strategy / simulation / report) and a
+``tournament:`` block describing the tournament's data files, metadata and bonus questions.
+Select a tournament with ``--config <file>``. The seed is mandatory and surfaced in the
+report for reproducibility.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from typing import Any
 
 import yaml
 
-_TOURNAMENTS_ROOT = Path(__file__).parent / "data" / "tournaments"
+_DATA_ROOT = Path(__file__).parent / "data"
 
 
 @dataclass(frozen=True)
@@ -53,22 +55,23 @@ class Config:
     strategy: StrategyConfig
     simulation: SimulationConfig
     report: ReportConfig
-    tournament: str = "wc2026"  # default tournament bundle; overridable via --tournament
     config_path: Path | None = None
 
 
 @dataclass(frozen=True)
 class TournamentBundle:
-    """A tournament's data files + bonus questions, resolved from its ``tournament.yaml``."""
+    """A tournament's data files + bonus questions, parsed from its config file's
+    ``tournament:`` block. The knockout bracket is derived from ``fixtures.csv``; the only
+    optional sidecar is ``thirds_allocation_file`` (a third-place combination->slot table).
+    """
 
     name: str
     display_name: str
     completed: bool
-    dir: Path
     teams_file: Path
     fixtures_file: Path
     results_file: Path
-    bracket_map_file: Path
+    thirds_allocation_file: Path | None = None
     bonus_questions: list[BonusQuestionConfig] = field(default_factory=list)
     elo_source: str = ""
 
@@ -76,12 +79,15 @@ class TournamentBundle:
 _VALID_PENALTY_MODELS = {"coin_flip", "elo_weighted"}
 
 
-def load_config(path: str | Path) -> Config:
+def _read(path: str | Path) -> tuple[Path, dict]:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
-    raw = yaml.safe_load(path.read_text()) or {}
+    return path, (yaml.safe_load(path.read_text()) or {})
 
+
+def load_config(path: str | Path) -> Config:
+    path, raw = _read(path)
     try:
         sim = raw["simulation"]
         penalty = sim.get("penalty_model", "coin_flip")
@@ -101,7 +107,6 @@ def load_config(path: str | Path) -> Config:
                 penalty_model=penalty,
             ),
             report=ReportConfig(**raw["report"]),
-            tournament=raw.get("tournament", "wc2026"),
             config_path=path,
         )
     except KeyError as exc:
@@ -109,33 +114,30 @@ def load_config(path: str | Path) -> Config:
     return cfg
 
 
-def available_tournaments(root: Path = _TOURNAMENTS_ROOT) -> list[str]:
-    if not root.exists():
-        return []
-    return sorted(p.name for p in root.iterdir() if (p / "tournament.yaml").exists())
+def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> TournamentBundle:
+    """Parse the ``tournament:`` block (+ ``bonus_questions:``) of a config file.
 
+    Data-file paths are resolved relative to ``<data_root>/<tournament.data_dir>``.
+    """
+    _path, raw = _read(path)
+    try:
+        t = raw["tournament"]
+    except KeyError as exc:
+        raise ValueError(f"Config {path} has no 'tournament:' block") from exc
 
-def resolve_tournament(name: str, *, root: Path = _TOURNAMENTS_ROOT) -> TournamentBundle:
-    """Load the bundle for ``name`` from ``<root>/<name>/tournament.yaml``."""
-    bundle_dir = root / name
-    spec_path = bundle_dir / "tournament.yaml"
-    if not spec_path.exists():
-        raise ValueError(
-            f"Unknown tournament {name!r}. Available: {available_tournaments(root)}"
-        )
-    raw = yaml.safe_load(spec_path.read_text()) or {}
+    data_dir = data_root / t["data_dir"]
+    thirds = t.get("thirds_allocation_file")
     return TournamentBundle(
-        name=raw.get("name", name),
-        display_name=raw.get("display_name", name),
-        completed=bool(raw.get("completed", False)),
-        dir=bundle_dir,
-        teams_file=bundle_dir / raw.get("teams_file", "teams.csv"),
-        fixtures_file=bundle_dir / raw.get("fixtures_file", "fixtures.csv"),
-        results_file=bundle_dir / raw.get("results_file", "results.csv"),
-        bracket_map_file=bundle_dir / raw.get("bracket_map_file", "bracket_map.json"),
+        name=t["name"],
+        display_name=t.get("display_name", t["name"]),
+        completed=bool(t.get("completed", False)),
+        teams_file=data_dir / t.get("teams_file", "teams.csv"),
+        fixtures_file=data_dir / t.get("fixtures_file", "fixtures.csv"),
+        results_file=data_dir / t.get("results_file", "results.csv"),
+        thirds_allocation_file=(data_dir / thirds) if thirds else None,
         bonus_questions=[
             BonusQuestionConfig(id=q["id"], points=int(q["points"]))
             for q in raw.get("bonus_questions", [])
         ],
-        elo_source=raw.get("elo_source", ""),
+        elo_source=t.get("elo_source", ""),
     )

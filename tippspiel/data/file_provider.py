@@ -1,7 +1,9 @@
-"""File-based DataProvider (spec §6.1.2–6.1.5) plus the R32 bracket map loader.
+"""File-based DataProvider (spec §6.1.2–6.1.5).
 
-Reads teams.csv, fixtures.csv, results.csv and r32_bracket_map.json. Matches present in
-results.csv are treated as played and fixed; matches absent are predicted/simulated.
+Reads teams.csv, fixtures.csv, results.csv. The knockout bracket is derived from the
+fixtures themselves (knockout fixtures reference group placings / earlier matches); the
+only optional sidecar is a third-place combination->slot allocation table. Matches present
+in results.csv are treated as played and fixed; matches absent are predicted/simulated.
 """
 
 from __future__ import annotations
@@ -30,12 +32,14 @@ class FileDataProvider(DataProvider):
         teams_file: str | Path,
         fixtures_file: str | Path,
         results_file: str | Path,
-        bracket_map_file: str | Path | None = None,
+        thirds_allocation_file: str | Path | None = None,
     ) -> None:
         self.teams_file = Path(teams_file)
         self.fixtures_file = Path(fixtures_file)
         self.results_file = Path(results_file)
-        self.bracket_map_file = Path(bracket_map_file) if bracket_map_file else None
+        self.thirds_allocation_file = (
+            Path(thirds_allocation_file) if thirds_allocation_file else None
+        )
 
     def get_teams(self) -> list[Team]:
         teams: list[Team] = []
@@ -94,7 +98,8 @@ class FileDataProvider(DataProvider):
                 )
         return results
 
-    def get_bracket_map(self) -> dict:
-        if not self.bracket_map_file or not self.bracket_map_file.exists():
-            raise FileNotFoundError("bracket_map_file is required for simulation")
-        return json.loads(self.bracket_map_file.read_text())
+    def get_thirds_allocation(self) -> dict:
+        """Optional explicit third-place combination->slot table; {} if not supplied."""
+        if not self.thirds_allocation_file or not self.thirds_allocation_file.exists():
+            return {}
+        return json.loads(self.thirds_allocation_file.read_text())

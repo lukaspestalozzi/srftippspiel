@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, resolve_tournament
+from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import _predict_tippable, build_predictor, build_strategy
 from tippspiel.report.diagnostics import DiagnosticsWriter, build_diagnostics
@@ -17,9 +17,9 @@ REPO = Path(tippspiel.__file__).parent.parent
 
 def _load():
     cfg = load_config(REPO / "config.yaml")
-    bundle = resolve_tournament("wc2026")
+    bundle = load_tournament(REPO / "config.yaml")
     prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file,
-                            bundle.results_file, bundle.bracket_map_file)
+                            bundle.results_file, bundle.thirds_allocation_file)
     teams = {t.team_id: t for t in prov.get_teams()}
     return cfg, bundle, teams, prov.get_fixtures(), prov
 
@@ -29,7 +29,7 @@ def diag():
     cfg, bundle, teams, fixtures, prov = _load()
     predictor = build_predictor(cfg)
     strategy = build_strategy(cfg, bundle)
-    outcome = TournamentSimulator(fixtures, teams, {}, predictor, prov.get_bracket_map(),
+    outcome = TournamentSimulator(fixtures, teams, {}, predictor, prov.get_thirds_allocation(),
                                   iterations=3000, seed=7).run()
     preds = _predict_tippable(fixtures, teams, set(), predictor)
     tipset = strategy.generate_tips(preds, outcome, fixtures)

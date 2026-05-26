@@ -61,7 +61,7 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
         bundle.teams_file,
         bundle.fixtures_file,
         bundle.results_file,
-        bundle.bracket_map_file,
+        bundle.thirds_allocation_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
@@ -80,7 +80,7 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
             teams=teams,
             results=results,
             predictor=predictor,
-            bracket_map=provider.get_bracket_map(),
+            thirds_allocation=provider.get_thirds_allocation(),
             iterations=cfg.simulation.iterations,
             seed=cfg.simulation.seed,
             penalty_model=cfg.simulation.penalty_model,
@@ -129,7 +129,7 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
     from .report.backtest import VerificationWriter, build_verification
 
     provider = FileDataProvider(
-        bundle.teams_file, bundle.fixtures_file, bundle.results_file, bundle.bracket_map_file,
+        bundle.teams_file, bundle.fixtures_file, bundle.results_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()

@@ -6,8 +6,8 @@
     tippspiel verify         backtest the predictor against a completed tournament (pool points)
     tippspiel validate-data  check input files for schema/consistency errors
 
-Every command takes ``--tournament NAME`` to select a bundle under
-tippspiel/data/tournaments/<name>/ (default from config.yaml; currently wc2026).
+Each tournament is one config file; select it with ``--config <file>`` (default
+``config.yaml``, FIFA World Cup 2026; further tournaments under ``configs/<name>.yaml``).
 """
 
 from __future__ import annotations
@@ -16,9 +16,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import available_tournaments, load_config, resolve_tournament
+from .config import load_config, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import run_pipeline, write_diagnostics, write_report, write_verification
+from .simulation.bracket import Bracket
 
 DEFAULT_CONFIG = "config.yaml"
 
@@ -93,10 +94,11 @@ def _cmd_validate(cfg, bundle) -> int:
 
 
 def validate_data(bundle) -> list[str]:
-    """Format-general input validation: derives expectations from the data + bracket map."""
+    """Format-general input validation: derives expectations from the data + fixtures bracket."""
     errors: list[str] = []
     provider = FileDataProvider(
-        bundle.teams_file, bundle.fixtures_file, bundle.results_file, bundle.bracket_map_file,
+        bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+        bundle.thirds_allocation_file,
     )
     try:
         teams = {t.team_id: t for t in provider.get_teams()}
@@ -135,14 +137,8 @@ def validate_data(bundle) -> list[str]:
         if counts[g] != expected:
             errors.append(f"group {g}: expected {expected} matches for {size} teams, found {counts[g]}")
 
-    try:
-        bm = provider.get_bracket_map()
-        if not bm.get("first_round", {}).get("slots"):
-            errors.append("bracket map: missing 'first_round.slots'")
-        if "progression" not in bm:
-            errors.append("bracket map: missing 'progression'")
-    except Exception as exc:  # noqa: BLE001
-        errors.append(f"bracket map unreadable: {exc}")
+    errors.extend(_validate_knockout(fixtures, sorted(by_group), provider))
+
     try:
         provider.get_results()
     except Exception as exc:  # noqa: BLE001
@@ -151,19 +147,45 @@ def validate_data(bundle) -> list[str]:
     return errors
 
 
+def _validate_knockout(fixtures, group_letters, provider) -> list[str]:
+    """Validate knockout references. A completed tournament may instead list concrete
+    knockout participants (no references), in which case there is nothing to derive."""
+    errors: list[str] = []
+    ko = [m for m in fixtures if m.group is None]
+    if not ko:
+        return errors
+    all_ids = {m.match_id for m in fixtures}
+    group_set = set(group_letters)
+    referenced = False
+    for m in ko:
+        for side in (m.home, m.away):
+            r = side.ko_ref
+            if r is None:
+                continue
+            referenced = True
+            if r.kind in ("winner", "runner_up") and r.group not in group_set:
+                errors.append(f"{m.match_id}: references unknown group {r.group!r}")
+            if r.kind == "third_pooled":
+                bad = [g for g in r.allowed_groups if g not in group_set]
+                if bad:
+                    errors.append(f"{m.match_id}: third slot allows unknown groups {bad}")
+            if r.kind in ("winner_of", "loser_of") and r.match_id not in all_ids:
+                errors.append(f"{m.match_id}: references unknown match {r.match_id!r}")
+    if referenced and all(m.home.ko_ref and m.away.ko_ref for m in ko):
+        try:
+            Bracket(ko, group_letters, provider.get_thirds_allocation())
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"bracket cannot be assembled from fixtures: {exc}")
+    return errors
+
+
 def _add_common_args(parser: argparse.ArgumentParser, *, with_default: bool) -> None:
-    # Top-level carries the real defaults; subcommand copies use SUPPRESS so a value given
+    # Top-level carries the real default; a subcommand copy uses SUPPRESS so a value given
     # before the subcommand is not overwritten. A value after the subcommand wins.
     parser.add_argument(
         "--config", metavar="PATH",
         default=(DEFAULT_CONFIG if with_default else argparse.SUPPRESS),
-        help=f"path to config file (default: {DEFAULT_CONFIG} in the current directory)",
-    )
-    parser.add_argument(
-        "--tournament", metavar="NAME",
-        default=(None if with_default else argparse.SUPPRESS),
-        help="tournament bundle to use (default: from config.yaml). "
-             f"Available: {', '.join(available_tournaments()) or 'none'}",
+        help=f"tournament config file (default: {DEFAULT_CONFIG}; others under configs/)",
     )
 
 
@@ -189,10 +211,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Config not found: {config_path}", file=sys.stderr)
         return 2
     cfg = load_config(config_path)
-
     try:
-        bundle = resolve_tournament(args.tournament or cfg.tournament)
-    except ValueError as exc:
+        bundle = load_tournament(config_path)
+    except (ValueError, KeyError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

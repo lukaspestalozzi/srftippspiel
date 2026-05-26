@@ -30,7 +30,7 @@ class TournamentSimulator:
         teams: dict[str, Team],
         results: dict[str, Result],
         predictor: Predictor,
-        bracket_map: dict,
+        thirds_allocation: dict | None = None,
         iterations: int = 50000,
         seed: int = 20260611,
         penalty_model: str = "coin_flip",
@@ -39,7 +39,6 @@ class TournamentSimulator:
         self.teams = teams
         self.results = results
         self.predictor = predictor
-        self.bracket = Bracket(bracket_map)
         self.n = iterations
         self.seed = seed
         self.penalty_model = penalty_model
@@ -56,9 +55,13 @@ class TournamentSimulator:
         self._group_pmf_cache: dict[str, np.ndarray] = {}
         self._pair_cdf = self._build_pair_cdf()
 
+        # The knockout bracket is derived from the (non-group) fixtures themselves.
+        self._groups = sorted(self._group_layouts)
+        ko_matches = [m for m in fixtures if m.group is None]
+        self.bracket = Bracket(ko_matches, self._groups, thirds_allocation)
+
         # Advancement metrics derived from the bracket's stage chain (format-agnostic):
         # group placements + one "reach_<stage>" per knockout stage + the title.
-        self._groups = sorted(self._group_layouts)
         chain = self.bracket.stage_chain
         self._adv_metrics = (
             ["group_winner", "group_second", "group_third"]
@@ -237,31 +240,30 @@ class TournamentSimulator:
         opp_dist: dict[str, dict] = {}
         first_reach = self._reach_metric(self.bracket.first_round_stage)
         first_winner_metric = self._winner_metric(self.bracket.first_round_stage)
-        for num, (hspec, aspec) in zip(self.bracket.first_round_ids, self.bracket.first_round_specs):
+        for mid, hspec, aspec in self.bracket.first_round:
             home = resolve_spec(hspec)
             away = resolve_spec(aspec)
             np.add.at(counts[first_reach], home, 1)
             np.add.at(counts[first_reach], away, 1)
-            fid = f"M{num}"
-            opp_dist[fid] = {"home": self._dist(home), "away": self._dist(away)}
-            w, l, hg, ag = self._play(home, away, fid)
+            opp_dist[mid] = {"home": self._dist(home), "away": self._dist(away)}
+            w, l, hg, ag = self._play(home, away, mid)
             np.add.at(team_goals, (it, home), hg)
             np.add.at(team_goals, (it, away), ag)
             zero_zero += (hg == 0) & (ag == 0)
-            match_winner[num] = w
-            match_loser[num] = l
+            match_winner[mid] = w
+            match_loser[mid] = l
             if first_winner_metric:
                 np.add.at(counts[first_winner_metric], w, 1)
 
-        for num, hspec, aspec, stage in self.bracket.progression:
+        for mid, hspec, aspec, stage in self.bracket.progression:
             home = match_winner[hspec[1]] if hspec[0] == "WIN" else match_loser[hspec[1]]
             away = match_winner[aspec[1]] if aspec[0] == "WIN" else match_loser[aspec[1]]
-            w, l, hg, ag = self._play(home, away, f"M{num}")
+            w, l, hg, ag = self._play(home, away, mid)
             np.add.at(team_goals, (it, home), hg)
             np.add.at(team_goals, (it, away), ag)
             zero_zero += (hg == 0) & (ag == 0)
-            match_winner[num] = w
-            match_loser[num] = l
+            match_winner[mid] = w
+            match_loser[mid] = l
             metric = self._winner_metric(stage)
             if metric:
                 np.add.at(counts[metric], w, 1)

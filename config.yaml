@@ -1,6 +1,5 @@
-# Which tournament bundle to use by default (tippspiel/data/tournaments/<name>/).
-# Override on the CLI with --tournament <name>.
-tournament: wc2026
+# Default tournament config (FIFA World Cup 2026). Each tournament is one config file;
+# select another with --config configs/<name>.yaml.
 
 predictor:
   name: elo_poisson
@@ -23,5 +22,22 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
-# Bonus questions are tournament-specific and now live in each tournament bundle's
-# tournament.yaml (e.g. tippspiel/data/tournaments/wc2026/tournament.yaml).
+tournament:
+  name: wc2026
+  display_name: FIFA World Cup 2026
+  completed: false        # not yet played; results.csv is conditioned on as it fills
+  data_dir: tournaments/wc2026   # relative to tippspiel/data/
+  elo_source: "eloratings.net snapshot (men); some playoff slots provisional (see README)"
+  # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
+  # derived from fixtures.csv. An explicit third-place combination->slot table can be added
+  # here once the official FIFA 'Annex C' is confirmed; absent, a constraint-respecting
+  # bipartite matching is used (see tippspiel/simulation/bracket.py).
+  # thirds_allocation_file: thirds_allocation.json
+
+# Bonus questions are tournament-specific (SRF pool, Swiss-focused, German labels).
+bonus_questions:
+  - { id: champion, points: 50 }
+  - { id: swiss_progress, points: 20 }    # how far Switzerland advances
+  - { id: swiss_goals, points: 20 }        # total goals Switzerland scores (120-min)
+  - { id: top_scorer_goals, points: 20 }   # Golden Boot tally (fixed historical prior)
+  - { id: zero_zero_count, points: 20 }    # number of 0:0 matches (result after 120 min)

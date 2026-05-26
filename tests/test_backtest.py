@@ -3,13 +3,14 @@
 from pathlib import Path
 
 import tippspiel
-from tippspiel.config import load_config, resolve_tournament
+from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import build_predictor
 from tippspiel.report.backtest import build_verification
 from tippspiel.strategy.expected_points import score_tip
 
 REPO = Path(tippspiel.__file__).parent.parent
+WOMENSEURO_CONFIG = REPO / "configs" / "womenseuro2025.yaml"
 
 
 def test_score_tip_hand_cases():
@@ -22,10 +23,10 @@ def test_score_tip_hand_cases():
 
 
 def test_verify_totals_are_internally_consistent():
-    cfg = load_config(REPO / "config.yaml")
-    bundle = resolve_tournament("womenseuro2025")
+    cfg = load_config(WOMENSEURO_CONFIG)
+    bundle = load_tournament(WOMENSEURO_CONFIG)
     prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file,
-                            bundle.results_file, bundle.bracket_map_file)
+                            bundle.results_file)
     teams = {t.team_id: t for t in prov.get_teams()}
     fixtures = prov.get_fixtures()
     results = {r.match_id: r for r in prov.get_results()}

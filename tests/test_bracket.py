@@ -1,24 +1,31 @@
-"""R32 bracket assembly tests (spec §3.3 / §6.1.4 / §10)."""
+"""Knockout bracket tests — derived from the fixtures (spec §3.3 / §6.1.4 / §10)."""
 
-import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 import tippspiel
+from tippspiel.config import load_tournament
+from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.simulation.bracket import Bracket, _match_slots
 
-BRACKET_FILE = Path(tippspiel.__file__).parent / "data" / "tournaments" / "wc2026" / "bracket_map.json"
+REPO = Path(tippspiel.__file__).parent.parent
 
 
 @pytest.fixture
 def bracket() -> Bracket:
-    return Bracket(json.loads(BRACKET_FILE.read_text()))
+    b = load_tournament(REPO / "config.yaml")  # FIFA World Cup 2026
+    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file,
+                            b.thirds_allocation_file)
+    fixtures = prov.get_fixtures()
+    groups = sorted({m.group for m in fixtures if m.group})
+    ko = [m for m in fixtures if m.group is None]
+    return Bracket(ko, groups, prov.get_thirds_allocation())
 
 
 def test_structure(bracket: Bracket):
-    assert len(bracket.first_round_specs) == 16
+    assert len(bracket.first_round) == 16
     assert bracket.first_round_stage == "R32"
     assert bracket.stage_chain == ["R32", "R16", "QF", "SF", "FINAL"]
     assert bracket.third_slots == [74, 77, 79, 80, 81, 82, 85, 87]
@@ -41,7 +48,7 @@ def test_forced_assignment_respects_unique_allowed_slots(bracket: Bracket):
 def test_assignment_is_valid_for_all_combinations(bracket: Bracket):
     # Every assignment must be a perfect matching into allowed slots (distinct groups,
     # each in its slot's allowed set).
-    for mask, assign in bracket._table.items():
+    for _mask, assign in bracket._table.items():
         assert len(set(assign.tolist())) == 8
         for p, slot in enumerate(bracket.third_slots):
             letter = "ABCDEFGHIJKL"[assign[p]]

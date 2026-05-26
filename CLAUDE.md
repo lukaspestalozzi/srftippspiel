@@ -24,25 +24,35 @@ tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
 tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
 ```
 
-Every command takes `--tournament <name>` (default `wc2026`, set in `config.yaml`).
+Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
+= FIFA World Cup 2026; further tournaments live under `configs/<name>.yaml`). A config file
+carries the engine defaults **and** a `tournament:` block (name, display name, `completed`
+flag, `data_dir`, Elo source, optional `thirds_allocation_file`) plus `bonus_questions:`.
 
 ## Tournaments layer
 
-A tournament is a self-contained bundle under `tippspiel/data/tournaments/<name>/`:
-`teams.csv`, `fixtures.csv`, `results.csv`, `bracket_map.json`, `tournament.yaml` (display
-name, data file names, `completed` flag, tournament-specific `bonus_questions`, Elo source).
-The **format is derived from the data**, not configured: group count/size from `fixtures.csv`,
-the knockout chain + whether thirds qualify from `bracket_map.json`. The engine is
-format-agnostic — it supports 48-team/12-group/best-8-thirds/R32-first (WC 2026) and
-16-team/4-group/no-thirds/QF-first (Women's Euro 2025) alike. Add a tournament by dropping in a
-new bundle; no engine code changes.
+A tournament's data lives under `tippspiel/data/tournaments/<name>/`: `teams.csv`,
+`fixtures.csv`, `results.csv` (+ an optional `thirds_allocation.json` sidecar). The
+**format is derived from the data**, not configured: group count/size from `fixtures.csv`,
+and the knockout chain + whether thirds qualify **from the knockout fixtures themselves** —
+KO rows reference group placings or earlier matches via structured refs in `home_ref`/`away_ref`:
+`W:A` (winner of group A), `R:B` (runner-up of B), `3RD:74:ABCDF` (a best-placed third fills
+slot 74, drawn from the listed allowed groups), `WIN:M101` / `LOSE:M101` (winner/loser of a
+match). A completed tournament may instead list concrete KO participants. The engine is
+format-agnostic — it supports 48-team/12-group/best-8-thirds/R32-first (WC 2026),
+32-team/8-group/no-thirds/R16-first (WC 2022), 24-team/6-group/best-thirds/R16-first (Euro 2024)
+and 16-team/4-group/no-thirds/QF-first (Women's Euro 2025) alike. Add a tournament by dropping
+in a data folder + a config file; no engine code changes. The third-place combination->slot
+table (FIFA "Annex C") is the **only** optional sidecar, needed only for an unplayed best-thirds
+format once the official table is confirmed; absent, a constraint-respecting bipartite matching
+over each slot's allowed groups is used (`tippspiel/simulation/bracket.py`).
 
-`tippspiel verify --tournament <completed>` is the **predictor-accuracy backtest**: it predicts
-every actual match a-priori from the pre-tournament Elo snapshot, tips it, and totals the pool
-points scored vs the actual results (with the naive most-likely tip as a baseline, and the
-per-match max). `womenseuro2025` is the seeded benchmark (England won; the model beats the
-naive baseline overall). Code: `tippspiel/report/backtest.py`; scoring helper `score_tip` in
-`strategy/expected_points.py`.
+`tippspiel verify --config configs/<completed>.yaml` is the **predictor-accuracy backtest**: it
+predicts every actual match a-priori from the pre-tournament Elo snapshot, tips it, and totals the
+pool points scored vs the actual results (with the naive most-likely tip as a baseline, and the
+per-match max). `womenseuro2025`, `wc2022` and `euro2024` are the seeded benchmarks; the model
+beats the naive baseline overall. Code: `tippspiel/report/backtest.py`; scoring helper `score_tip`
+in `strategy/expected_points.py`.
 
 ## The diagnostic report — my primary analysis tool
 
@@ -78,11 +88,12 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - `tippspiel/pipeline.py` — orchestration. `_run_core(cfg, bundle, ...)` returns the raw
   objects shared by all reports; `run_pipeline()`/`write_diagnostics()`/`write_verification()`
   build the HTML report / diagnostic / backtest respectively.
-- `tippspiel/config.py` — global engine config (`load_config`) + per-tournament bundle
-  resolution (`resolve_tournament`, `available_tournaments`, `TournamentBundle`).
+- `tippspiel/config.py` — engine config (`load_config`) + tournament resolution from the same
+  config file (`load_tournament` → `TournamentBundle`).
 - `tippspiel/report/backtest.py` — the `verify` historical backtest.
-- `tippspiel/data/tournaments/<name>/` — per-tournament data bundles; `historical_stats.py`
-  holds sourced reference stats (top-scorer prior + validation bands).
+- `tippspiel/data/tournaments/<name>/` — per-tournament data (teams/fixtures/results + optional
+  `thirds_allocation.json`); `historical_stats.py` holds sourced reference stats (top-scorer
+  prior + validation bands). Config files: `config.yaml` + `configs/<name>.yaml`.
 
 ## Conventions & gotchas
 
@@ -93,9 +104,10 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - **Format-agnostic engine**: the simulator/bracket derive groups, the thirds count, and the
   knockout `stage_chain` from the data. Advancement metrics are stage-keyed `reach_<stage>`
   (e.g. `reach_r32`/`reach_r16`/.../`wins_title`; `reach_qf` is the first KO round for a
-  16-team event). `bracket_map.json` uses a generic `first_round` (with `stage`) + `progression`
-  schema; `_meta.third_place_slots` empty ⇒ no thirds. Don't hardcode group counts or stage
-  names.
+  16-team event). The `Bracket` is built from the knockout fixtures (`Bracket(ko_matches,
+  group_letters, thirds_allocation)`): first round = KO fixtures filled from group standings,
+  progression = those filled from earlier matches; third-place slots + their allowed groups come
+  from the `3RD:<slot>:<groups>` refs. Don't hardcode group counts or stage names.
 - **Goal tallies use the 120-minute scoreline only** (penalty-shootout goals excluded).
 - **Bonus questions are exact-match scored** → recommend the **mode** (argmax). The strategy
   bonus loop already does this generically; add a question by subclassing `BonusQuestion`,

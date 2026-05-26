@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, resolve_tournament
+from tippspiel.config import load_config, load_tournament
 from tippspiel.model.types import Result
 from tippspiel.pipeline import run_pipeline, write_report
 
 REPO = Path(tippspiel.__file__).parent.parent
-BUNDLE = resolve_tournament("wc2026")
+BUNDLE = load_tournament(REPO / "config.yaml")
 
 
 @pytest.fixture(scope="module")

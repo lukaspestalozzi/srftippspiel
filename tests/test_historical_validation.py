@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, resolve_tournament
+from tippspiel.config import load_config, load_tournament
 from tippspiel.data import historical_stats
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import build_predictor
@@ -27,11 +27,12 @@ REPO = Path(tippspiel.__file__).parent.parent
 @pytest.fixture(scope="module")
 def outcome():
     cfg = load_config(REPO / "config.yaml")
-    b = resolve_tournament("wc2026")
-    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file, b.bracket_map_file)
+    b = load_tournament(REPO / "config.yaml")
+    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file,
+                            b.thirds_allocation_file)
     teams = {t.team_id: t for t in prov.get_teams()}
     sim = TournamentSimulator(prov.get_fixtures(), teams, {}, build_predictor(cfg),
-                              prov.get_bracket_map(), iterations=8000, seed=123)
+                              prov.get_thirds_allocation(), iterations=8000, seed=123)
     return sim.run()
 
 

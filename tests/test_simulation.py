@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, resolve_tournament
+from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.model.types import Result
 from tippspiel.pipeline import build_predictor
@@ -18,21 +18,22 @@ REPO = Path(tippspiel.__file__).parent.parent
 @pytest.fixture(scope="module")
 def env():
     cfg = load_config(REPO / "config.yaml")
-    b = resolve_tournament("wc2026")
-    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file, b.bracket_map_file)
+    b = load_tournament(REPO / "config.yaml")
+    prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file,
+                            b.thirds_allocation_file)
     teams = {t.team_id: t for t in prov.get_teams()}
     return {
         "teams": teams,
         "fixtures": prov.get_fixtures(),
         "predictor": build_predictor(cfg),
-        "bracket_map": prov.get_bracket_map(),
+        "thirds": prov.get_thirds_allocation(),
     }
 
 
 def _sim(env, results, n, seed):
     return TournamentSimulator(
         env["fixtures"], env["teams"], results, env["predictor"],
-        env["bracket_map"], iterations=n, seed=seed,
+        env["thirds"], iterations=n, seed=seed,
     )
 
 
