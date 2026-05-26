@@ -1,0 +1,47 @@
+# Default tournament config (FIFA World Cup 2026). Each tournament is one config file;
+# select another with --config configs/<name>.yaml.
+
+predictor:
+  name: elo_poisson
+  # Tuned against the completed-tournament backtests via `tippspiel tune` (blended
+  # calibration + pool-points objective): sharper favourites (k), a negative Dixon-Coles
+  # term that lifts draws over 1:0/0:1 (rho), and a knockout goal-scale for the 120-min results.
+  params:
+    mu: 2.6
+    k: 0.002
+    gmax: 7
+    rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
+    host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
+    ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
+
+strategy:
+  name: expected_points
+
+simulation:
+  iterations: 50000
+  seed: 20260611
+  penalty_model: coin_flip   # coin_flip | elo_weighted
+
+report:
+  output_dir: output/
+  display_timezone: Europe/Zurich
+
+tournament:
+  name: wc2026
+  display_name: FIFA World Cup 2026
+  completed: false        # not yet played; results.csv is conditioned on as it fills
+  data_dir: tournaments/wc2026   # relative to tippspiel/data/
+  elo_source: "eloratings.net snapshot (men); some playoff slots provisional (see README)"
+  # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
+  # derived from fixtures.csv. An explicit third-place combination->slot table can be added
+  # here once the official FIFA 'Annex C' is confirmed; absent, a constraint-respecting
+  # bipartite matching is used (see tippspiel/simulation/bracket.py).
+  # thirds_allocation_file: thirds_allocation.json
+
+# Bonus questions are tournament-specific (SRF pool, Swiss-focused, German labels).
+bonus_questions:
+  - { id: champion, points: 50 }
+  - { id: swiss_progress, points: 20 }    # how far Switzerland advances
+  - { id: swiss_goals, points: 20 }        # total goals Switzerland scores (120-min)
+  - { id: top_scorer_goals, points: 20 }   # Golden Boot tally (fixed historical prior)
+  - { id: zero_zero_count, points: 20 }    # number of 0:0 matches (result after 120 min)

@@ -1,0 +1,40 @@
+# UEFA Women's Euro 2025 — completed tournament, used by `tippspiel verify` as a
+# predictor-accuracy backtest benchmark. Run: tippspiel verify --config configs/womenseuro2025.yaml
+#
+# Engine settings mirror config.yaml; simulation settings are unused by `verify` but kept so
+# the file is a complete, self-contained tournament config (run/diagnose also work on it).
+
+predictor:
+  name: elo_poisson
+  params:        # tuned via `tippspiel tune` (see config.yaml)
+    mu: 2.6
+    k: 0.002
+    gmax: 7
+    rho: -0.1
+    host_elo_bonus: 40
+    ko_goal_scale: 1.2
+
+strategy:
+  name: expected_points
+
+simulation:
+  iterations: 50000
+  seed: 20260611
+  penalty_model: coin_flip
+
+report:
+  output_dir: output/
+  display_timezone: Europe/Zurich
+
+tournament:
+  name: womenseuro2025
+  display_name: UEFA Women's Euro 2025
+  completed: true
+  data_dir: tournaments/womenseuro2025
+  # Pre-tournament ratings: best-effort June-2025 FIFA Women's World Ranking points (the FIFA
+  # women's ranking is itself an Elo system). Approximate/provisional and rounded to signal
+  # that; pre-tournament so the verification backtest has no result leakage.
+  elo_source: "FIFA Women's World Ranking ~June 2025 (Elo-based); approximate, provisional"
+
+bonus_questions:
+  - { id: champion, points: 50 }

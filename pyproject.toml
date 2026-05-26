@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tippspiel"
+version = "0.1.0"
+description = "FIFA World Cup 2026 betting-pool (Tippspiel) prediction tool"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "plotly>=5.20",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+tippspiel = "tippspiel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tippspiel*"]
+
+[tool.setuptools.package-data]
+tippspiel = [
+    "data/tournaments/*/*.csv", "data/tournaments/*/*.json", "data/tournaments/*/*.yaml",
+    "report/templates/*.j2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

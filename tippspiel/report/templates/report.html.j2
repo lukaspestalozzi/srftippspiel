@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tippspiel Predictor — WC 2026</title>
+<style>
+  :root { --fg:#222; --muted:#666; --line:#e2e2e2; --accent:#2c7fb8; --tip:#e6550d; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         color: var(--fg); line-height: 1.5; margin: 0; background:#fafafa; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 80px; }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; border-bottom: 2px solid var(--line); padding-bottom: 6px;
+       margin-top: 40px; }
+  h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .toc { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; }
+  .toc ul { margin: 6px 0; padding-left: 20px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:0;
+          margin: 12px 0; overflow:hidden; }
+  details > summary { cursor:pointer; padding:12px 16px; font-weight:600;
+                      list-style:none; display:flex; justify-content:space-between;
+                      align-items:center; gap:12px; }
+  details > summary::-webkit-details-marker { display:none; }
+  details[open] > summary { border-bottom:1px solid var(--line); }
+  .summary-right { font-weight:400; color:var(--muted); font-size:.9rem; }
+  .fixture-body { padding: 8px 16px 16px; }
+  .tipline { background:#fff7f0; border:1px solid #f3d3bd; border-radius:6px;
+             padding:10px 14px; margin:10px 0; }
+  .tip-score { color:var(--tip); font-weight:700; font-size:1.15rem; }
+  .badge { display:inline-block; background:#eef4f9; color:var(--accent);
+           border-radius:10px; padding:1px 8px; font-size:.78rem; }
+  .played { color: var(--muted); }
+  table.kv { border-collapse:collapse; font-size:.9rem; }
+  table.kv td { padding:2px 10px 2px 0; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .grid2 { grid-template-columns: 1fr; } }
+  footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line);
+           color:var(--muted); font-size:.85rem; }
+  .pre { background:#f4f4f4; border-radius:6px; padding:8px 10px; font-size:.82rem;
+         overflow-x:auto; }
+</style>
+<script type="text/javascript">{{ plotlyjs }}</script>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Tippspiel Predictor — FIFA World Cup 2026</h1>
+  <p class="meta">
+    Generated {{ header.generated_at }} ·
+    Predictor <b>{{ header.predictor_name }}</b> ·
+    Strategy <b>{{ header.strategy_name }}</b>
+    {% if header.mc_iterations %} · MC {{ "{:,}".format(header.mc_iterations) }} iters (seed {{ header.mc_seed }}){% endif %}
+    · {{ header.results_count }} result(s) incorporated
+  </p>
+  <table class="kv meta"><tr><td>Predictor params</td>
+    <td><span class="pre">{{ header.predictor_params }}</span></td></tr></table>
+
+  <div class="toc">
+    <b>Contents</b>
+    <ul>
+      <li><a href="#groups">Group-stage fixtures</a>
+        <ul>{% for g in groups %}<li><a href="#group-{{ g.letter }}">Group {{ g.letter }}</a></li>{% endfor %}</ul>
+      </li>
+      {% if groups and groups[0].advancement_chart %}<li><a href="#advancement">Group advancement</a></li>{% endif %}
+      {% if knockout_fixtures %}<li><a href="#knockout">Knockout fixtures</a></li>{% endif %}
+      {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
+      {% if bracket_html %}<li><a href="#bracket">Knockout bracket</a></li>{% endif %}
+      {% if bonus %}<li><a href="#bonus">Bonus recommendations</a></li>{% endif %}
+      <li><a href="#caveats">Caveats</a></li>
+    </ul>
+  </div>
+
+  <h2 id="groups">Group-stage fixtures</h2>
+  {% for g in groups %}
+    <h3 id="group-{{ g.letter }}">Group {{ g.letter }}</h3>
+    {% for fx in g.fixtures %}
+      <div class="card"><details {% if not fx.played %}open{% endif %}>
+        <summary>
+          <span>{{ fx.home }} vs {{ fx.away }}
+            {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
+          </span>
+          <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% endif %}</span>
+        </summary>
+        <div class="fixture-body">
+          {% if fx.played %}
+            <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
+          {% else %}
+            {% if fx.tip %}
+            <div class="tipline">
+              Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
+              <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
+              {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
+            </div>
+            {% endif %}
+            <div class="grid2">
+              <div>{{ fx.ldw_chart | safe }}</div>
+              <div>{{ fx.heatmap | safe }}</div>
+            </div>
+          {% endif %}
+        </div>
+      </details></div>
+    {% endfor %}
+  {% endfor %}
+
+  {% if groups and groups[0].advancement_chart %}
+  <h2 id="advancement">Group advancement</h2>
+  {% for g in groups %}{% if g.advancement_chart %}{{ g.advancement_chart | safe }}{% endif %}{% endfor %}
+  {% endif %}
+
+  {% if knockout_fixtures %}
+  <h2 id="knockout">Knockout fixtures</h2>
+  {% for fx in knockout_fixtures %}
+    <div class="card"><details {% if fx.tip and not fx.played %}open{% endif %}>
+      <summary>
+        <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
+          {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
+        </span>
+        <span class="summary-right">{% if fx.tip %}tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %}participants TBD{% endif %}</span>
+      </summary>
+      <div class="fixture-body">
+        {% if fx.tip %}
+          <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
+            <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span></div>
+          <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
+        {% else %}
+          <p class="meta">{{ fx.slot_note }}</p>
+          {% if fx.occupants_chart %}{{ fx.occupants_chart | safe }}{% endif %}
+        {% endif %}
+      </div>
+    </details></div>
+  {% endfor %}
+  {% endif %}
+
+  {% if title_odds_chart %}
+  <h2 id="title">Title odds</h2>
+  {{ title_odds_chart | safe }}
+  {% endif %}
+
+  {% if bracket_html %}
+  <h2 id="bracket">Knockout bracket</h2>
+  {{ bracket_html | safe }}
+  {% endif %}
+
+  {% if bonus %}
+  <h2 id="bonus">Bonus recommendations</h2>
+  {% for b in bonus %}
+    <div class="card"><div class="fixture-body">
+      <h3 style="margin-top:4px">{{ b.question }} <span class="badge">{{ b.points }} pts</span></h3>
+      <p>Recommended: <b>{{ b.answer }}</b> ({{ "%.1f"|format(b.prob*100) }}%)
+        {% if b.runner_up %}· runner-up {{ b.runner_up }} ({{ "%.1f"|format(b.runner_up_prob*100) }}%){% endif %}</p>
+      {% if b.chart %}{{ b.chart | safe }}{% endif %}
+    </div></div>
+  {% endfor %}
+  {% endif %}
+
+  <footer id="caveats">
+    <h2 style="border:none">Caveats</h2>
+    <p>{{ caveats }}</p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# UEFA Euro 2024 (Germany) — completed tournament, a `tippspiel verify` backtest benchmark.
+# Run: tippspiel verify --config configs/euro2024.yaml
+# Format: 24 teams, 6 groups of 4, top 2 + 4 best thirds advance, R16 -> QF -> SF -> Final
+# (no third-place playoff). Knockout participants are concrete, so verify needs no bracket.
+
+predictor:
+  name: elo_poisson
+  params:        # tuned via `tippspiel tune` (see config.yaml)
+    mu: 2.6
+    k: 0.002
+    gmax: 7
+    rho: -0.1
+    host_elo_bonus: 40
+    ko_goal_scale: 1.2
+
+strategy:
+  name: expected_points
+
+simulation:
+  iterations: 50000
+  seed: 20260611
+  penalty_model: coin_flip
+
+report:
+  output_dir: output/
+  display_timezone: Europe/Zurich
+
+tournament:
+  name: euro2024
+  display_name: UEFA Euro 2024
+  completed: true
+  data_dir: tournaments/euro2024
+  # Pre-tournament men's Elo (eloratings.net-style, ~June 2024); approximate, provisional.
+  # Pre-tournament so the verification backtest has no result leakage.
+  elo_source: "eloratings.net men's snapshot ~June 2024; approximate, provisional"
+
+bonus_questions:
+  - { id: champion, points: 50 }
