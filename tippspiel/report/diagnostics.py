@@ -220,22 +220,12 @@ def _rank_comparison(cfg, predictions, fixtures) -> dict | None:
     Shows how much (and where) optimising for P(rank=1) against the modelled field would
     deviate from EV-maximisation — the payoff artifact of the rank-optimising strategy.
     Always computed (regardless of the active strategy) at a modest world count."""
-    if not predictions:
-        return None
-    from ..strategy.rank_optimizing import PredictorDerivedFieldModel, optimize_slate
+    from ..strategy.rank_optimizing import comparison_from_params
 
     p = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
-    field_model = PredictorDerivedFieldModel(
-        expert_fraction=p.get("expert_fraction", 0.6),
-        temperature=p.get("temperature", 1.5),
-    )
-    comp = optimize_slate(
-        predictions, fixtures, field_model,
-        pool_size=p.get("pool_size", 200_000),
-        top_n=p.get("top_n", 1),
-        n_worlds=min(p.get("n_worlds", 8000), 8000),
-        seed=cfg.simulation.seed,
-    )
+    comp = comparison_from_params(predictions, fixtures, p, seed=cfg.simulation.seed)
+    if comp is None:
+        return None
     return {
         "pool_size": comp.pool_size, "top_n": comp.top_n, "n_worlds": comp.n_worlds,
         "n_tippable": len(comp.ev_slate),

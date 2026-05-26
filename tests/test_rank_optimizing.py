@@ -13,6 +13,8 @@ from tippspiel.pipeline import _predict_tippable, build_predictor, build_strateg
 from tippspiel.strategy.rank_optimizing import (
     PredictorDerivedFieldModel,
     RankOptimizingStrategy,
+    SlateComparison,
+    comparison_from_params,
     field_score_moments,
     optimize_slate,
 )
@@ -157,6 +159,55 @@ def test_cli_strategy_override():
     overridden = _override_strategy(cfg, "rank_optimizing")
     assert overridden.strategy.name == "rank_optimizing"
     assert cfg.strategy.name == "expected_points"        # original unchanged (frozen)
+
+
+def test_comparison_from_params_groups_and_empty():
+    preds = {
+        "m1": _pred("m1", _dist({(2, 0): 0.5, (1, 0): 0.3, (0, 0): 0.1, (1, 1): 0.1}, 3)),
+        "m2": _pred("m2", _dist({(1, 0): 0.28, (0, 1): 0.28, (1, 1): 0.22, (2, 1): 0.22}, 3)),
+    }
+    fixtures = [_match("m1"), _match("m2")]
+    comp = comparison_from_params(preds, fixtures, {"n_worlds": 500}, seed=1)
+    assert isinstance(comp, SlateComparison)
+    assert set(comp.ev_slate) == {"m1", "m2"}
+    # No tippable fixtures -> no comparison.
+    assert comparison_from_params({}, fixtures, {}, seed=1) is None
+
+
+def test_report_context_carries_strategy_comparison(tmp_path):
+    import dataclasses
+
+    from tippspiel.pipeline import run_pipeline
+    from tippspiel.report.html_writer import ReportWriter
+
+    cfg = load_config(REPO / "config.yaml")
+    bundle = load_tournament(REPO / "config.yaml")
+    # Active rank-optimising with a small world count keeps this fast.
+    cfg = dataclasses.replace(
+        cfg,
+        strategy=dataclasses.replace(
+            cfg.strategy, name="rank_optimizing", params={"n_worlds": 600}
+        ),
+    )
+    context = run_pipeline(cfg, bundle, simulate=False)["context"]
+
+    sc = context["strategy_comparison"]
+    assert sc is not None
+    assert sc["n_tippable"] == 72
+    assert 0 <= sc["n_diff"] <= sc["n_tippable"]
+    # Every tippable group fixture carries a compare dict with a boolean deviation flag.
+    blocks = [fx for g in context["groups"] for fx in g["fixtures"]]
+    tippable = [fx for fx in blocks if fx["tip"] is not None]
+    assert len(tippable) == 72
+    for fx in tippable:
+        assert fx["compare"] is not None
+        assert isinstance(fx["compare"]["differs"], bool)
+
+    html = ReportWriter().render(context)
+    assert 'id="strategy"' in html
+    assert "Strategy comparison" in html
+    if sc["n_diff"] > 0:
+        assert "badge-diff" in html and "contrarian" in html
 
 
 def test_build_strategy_dispatches_rank_optimizing():

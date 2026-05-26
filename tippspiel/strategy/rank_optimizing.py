@@ -330,6 +330,37 @@ def optimize_slate(
     )
 
 
+def field_model_from_params(params: dict) -> PredictorDerivedFieldModel:
+    """Build the predictor-derived field model from strategy params (shared by report paths)."""
+    return PredictorDerivedFieldModel(
+        expert_fraction=params.get("expert_fraction", 0.6),
+        temperature=params.get("temperature", 1.5),
+    )
+
+
+def comparison_from_params(
+    predictions: dict[str, MatchPrediction],
+    fixtures: list[Match],
+    params: dict,
+    *,
+    seed: int,
+    n_worlds_cap: int = 8000,
+) -> SlateComparison | None:
+    """EV-vs-rank slate comparison from strategy params; ``None`` when nothing is tippable.
+
+    Shared by the diagnostic (§7) and the HTML report so both surface identical numbers; the
+    world count is capped to keep report generation snappy regardless of the active strategy."""
+    if not predictions:
+        return None
+    return optimize_slate(
+        predictions, fixtures, field_model_from_params(params),
+        pool_size=params.get("pool_size", 200_000),
+        top_n=params.get("top_n", 1),
+        n_worlds=min(params.get("n_worlds", n_worlds_cap), n_worlds_cap),
+        seed=seed,
+    )
+
+
 class RankOptimizingStrategy(TipStrategy):
     name = "rank_optimizing"
 
