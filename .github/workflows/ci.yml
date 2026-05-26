@@ -11,31 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install and test
         run: |
-          set -o pipefail
           python -m pip install -U pip
-          { python -m pip install -e ".[dev]" && python -m pytest -rA; } 2>&1 | tee /tmp/ci.log
-      # Temporary diagnostic: surface the failing tail as a PR comment (CI logs aren't otherwise
-      # accessible to the automation). Remove once the CI failure is understood.
-      - name: Report failure on PR
-        if: ${{ failure() && github.event_name == 'pull_request' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo "CI \`Run tests\` failed — diagnostic tail of install+pytest:"
-            echo '```'
-            tail -n 150 /tmp/ci.log
-            echo '```'
-          } > /tmp/comment.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/comment.md || true
+          python -m pip install -e ".[dev]"
+          python -m pytest -rA
 
   artifacts:
     name: ${{ matrix.name }}
@@ -84,8 +69,8 @@ jobs:
             artifact: verify-euro2020
             path: output/verify.md
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -97,7 +82,7 @@ jobs:
           mkdir -p output
           tippspiel ${{ matrix.args }} | tee "output/${{ matrix.name }}.log"
       - name: Upload ${{ matrix.artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.path }}
