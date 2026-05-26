@@ -52,9 +52,9 @@ over each slot's allowed groups is used (`tippspiel/simulation/bracket.py`).
 predicts every actual match a-priori from the pre-tournament Elo snapshot, tips it, and totals the
 pool points scored vs the actual results (with the naive most-likely tip as a baseline, and the
 per-match max). It also reports **calibration** (mean tendency RPS + scoreline NLL).
-`womenseuro2025`, `wc2022` and `euro2024` are the seeded benchmarks; the model beats the naive
-baseline on all three. Code: `tippspiel/report/backtest.py`; scoring helper `score_tip` in
-`strategy/expected_points.py`.
+`womenseuro2025`, `wc2022`, `euro2024`, `wc2018` and `euro2020` are the seeded benchmarks; the
+model beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`; scoring helper
+`score_tip` in `strategy/expected_points.py`.
 
 `tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
 `ko_goal_scale`) over the completed-tournament backtests and writes a leaderboard

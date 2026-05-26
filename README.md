@@ -52,9 +52,9 @@ data folder + a config file.
 `tippspiel verify --config configs/<completed>.yaml` backtests predictor accuracy: it tips every
 actual match a-priori from the pre-tournament Elo snapshot and totals the **pool points** the
 tips would have scored against the real results, against a naive most-likely-scoreline baseline
-and the per-match maximum, plus **calibration** (tendency RPS + scoreline NLL). `womenseuro2025`,
-`wc2022` and `euro2024` ship as seeded benchmarks; the model beats the naive baseline on all
-three. Output: `output/verify.{md,json}`.
+and the per-match maximum, plus **calibration** (tendency RPS + scoreline NLL). Five completed
+tournaments ship as seeded benchmarks — `womenseuro2025`, `wc2022`, `euro2024`, `wc2018` and
+`euro2020`; the model beats the naive baseline on all five. Output: `output/verify.{md,json}`.
 
 `tippspiel tune` sweeps the predictor parameters (`mu`, `k`, `rho`, `host_elo_bonus`,
 `ko_goal_scale`) over those benchmarks and writes a leaderboard (`output/tune.{md,json}`),
