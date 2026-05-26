@@ -59,6 +59,14 @@ jobs:
             args: verify --config configs/euro2024.yaml
             artifact: verify-euro2024
             path: output/verify.md
+          - name: verify-wc2018
+            args: verify --config configs/wc2018.yaml
+            artifact: verify-wc2018
+            path: output/verify.md
+          - name: verify-euro2020
+            args: verify --config configs/euro2020.yaml
+            artifact: verify-euro2020
+            path: output/verify.md
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

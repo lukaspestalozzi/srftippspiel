@@ -60,6 +60,8 @@ def test_verify_totals_are_internally_consistent():
 _BENCHMARKS = [
     (REPO / "configs" / "wc2022.yaml", 64, 16),     # 48 group + 16 knockout
     (REPO / "configs" / "euro2024.yaml", 51, 15),   # 36 group + 15 knockout (no 3rd-place game)
+    (REPO / "configs" / "wc2018.yaml", 64, 16),     # 48 group + 16 knockout
+    (REPO / "configs" / "euro2020.yaml", 51, 15),   # 36 group + 15 knockout (no 3rd-place game)
 ]
 
 

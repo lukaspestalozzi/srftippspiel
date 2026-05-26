@@ -1,0 +1,36 @@
+# FIFA World Cup 2018 (Russia) — completed tournament, a `tippspiel verify` backtest benchmark.
+# Run: tippspiel verify --config configs/wc2018.yaml
+# Format: 32 teams, 8 groups of 4, top 2 advance (no thirds), R16 -> QF -> SF -> 3rd -> Final.
+
+predictor:
+  name: elo_poisson
+  params:        # tuned via `tippspiel tune` (see config.yaml)
+    mu: 2.6
+    k: 0.002
+    gmax: 7
+    rho: -0.1
+    host_elo_bonus: 40
+    ko_goal_scale: 1.2
+
+strategy:
+  name: expected_points
+
+simulation:
+  iterations: 50000
+  seed: 20260611
+  penalty_model: coin_flip
+
+report:
+  output_dir: output/
+  display_timezone: Europe/Zurich
+
+tournament:
+  name: wc2018
+  display_name: FIFA World Cup 2018
+  completed: true
+  data_dir: tournaments/wc2018
+  # Pre-tournament men's Elo (eloratings.net-style, ~June 2018); approximate, provisional.
+  elo_source: "eloratings.net men's snapshot ~June 2018; approximate, provisional"
+
+bonus_questions:
+  - { id: champion, points: 50 }

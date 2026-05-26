@@ -23,6 +23,8 @@ ALL_CONFIGS = [
     WOMENSEURO,
     REPO / "configs" / "wc2022.yaml",
     REPO / "configs" / "euro2024.yaml",
+    REPO / "configs" / "wc2018.yaml",
+    REPO / "configs" / "euro2020.yaml",
 ]
 
 

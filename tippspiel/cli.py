@@ -32,6 +32,8 @@ DEFAULT_BENCHMARKS = [
     "configs/womenseuro2025.yaml",
     "configs/wc2022.yaml",
     "configs/euro2024.yaml",
+    "configs/wc2018.yaml",
+    "configs/euro2020.yaml",
 ]
 
 
