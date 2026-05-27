@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, load_tournament
+from tippspiel.config import load_config, load_tournament, select_predictor
 from tippspiel.model.types import Result
 from tippspiel.pipeline import run_pipeline, write_report
 
@@ -17,7 +17,7 @@ BUNDLE = load_tournament(REPO / "config.yaml")
 
 @pytest.fixture(scope="module")
 def small_cfg():
-    cfg = load_config(REPO / "config.yaml")
+    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
     sim = dataclasses.replace(cfg.simulation, iterations=400)
     return dataclasses.replace(cfg, simulation=sim)
 

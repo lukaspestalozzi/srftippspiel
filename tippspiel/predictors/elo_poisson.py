@@ -44,6 +44,7 @@ def scoreline_from_rates(lambda_h: float, lambda_a: float, gmax: int, rho: float
 
 class EloPoissonPredictor(Predictor):
     name = "elo_poisson"
+    ratings_kind = "elo"  # reads the official eloratings snapshot (Team.elo)
 
     def __init__(
         self,

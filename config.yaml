@@ -1,18 +1,26 @@
 # Default tournament config (FIFA World Cup 2026). Each tournament is one config file;
 # select another with --config configs/<name>.yaml.
 
-predictor:
-  name: elo_poisson
-  # Tuned against the completed-tournament backtests via `tippspiel tune` (blended
-  # calibration + pool-points objective): sharper favourites (k), a negative Dixon-Coles
-  # term that lifts draws over 1:0/0:1 (rho), and a knockout goal-scale for the 120-min results.
-  params:
+# Prediction models. There is NO default — every command that predicts requires
+# `--predictor elo_poisson | attack_defence_poisson` (params for the chosen model are read here).
+# Each model reads its own ratings file: elo_poisson -> teams.csv (official eloratings snapshot),
+# attack_defence_poisson -> teams_attack_defence.csv (computed; see the elo: block + CLAUDE.md).
+predictors:
+  # Tuned against the completed-tournament backtests via `tippspiel tune` (blended calibration +
+  # pool-points objective): sharper favourites (k), a negative Dixon-Coles term that lifts draws
+  # over 1:0/0:1 (rho), and a knockout goal-scale for the 120-min results.
+  elo_poisson:
     mu: 2.6
     k: 0.002
     gmax: 7
     rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
     host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
     ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
+  attack_defence_poisson:
+    rho: -0.1
+    ko_goal_scale: 1.2
+    base_log_rate: 0.3
+    home_advantage: 0.0
 
 strategy:
   name: expected_points
@@ -26,21 +34,22 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
-# `tippspiel build-elo` recomputes World Football Elo from ~25y of historical results, weighting
-# recent matches more heavily. All keys are optional (defaults shown). `tier_k` maps the dataset's
-# competition name to an importance K via an ordered first-match-wins substring scan.
+# `tippspiel build-elo` recomputes ratings from ~25y of historical results. The attack/defence
+# model (two ratings/team, SGD on the Poisson goal likelihood; full history, recency off) is the
+# tuned men's source and beats eloratings on pool points — it produces the teams_attack_defence.csv
+# read by the attack_defence_poisson predictor. Regenerate with:
+#   tippspiel build-elo --config config.yaml --write-teams \
+#     tippspiel/data/tournaments/wc2026/teams_attack_defence.csv
+# `tier_k` maps the dataset's competition name to an importance K (ordered substring scan).
+# For the classic World Football Elo instead, set model: world_football (+ recency_decay/lookback).
 elo:
-  lookback_years: 25       # only matches within this window count
-  recency_decay: true      # weight recent matches more heavily
-  half_life_years: 8       # a match this old counts ~half as much as a fresh one
-  seed_rating: 1500        # starting rating for a newly-seen team
-  home_advantage: 100      # Elo added to the home side on non-neutral ground
-  # Alternative rating scheme that beats eloratings on the men's backtests (pool points):
-  #   model: attack_defence   # two ratings/team, SGD on the Poisson goal likelihood
-  #   recency_decay: false    # recency hurts accuracy here; use full history
-  #   lookback_years: 200
-  # Pair with predictor: { name: attack_defence_poisson, params: { rho: -0.1, ko_goal_scale: 1.2 } }
-  # and point teams_file at a `build-elo --write-teams` output. See CLAUDE.md "Attack/defence model".
+  model: attack_defence
+  recency_decay: false     # recency hurts accuracy here; use full history
+  lookback_years: 200
+  learning_rate: 0.03
+  ad_home_advantage: 0.0   # neutral-venue events tuned best with no log-goal home advantage
+  seed_rating: 1500        # starting rating for a newly-seen team (world_football model)
+  home_advantage: 100      # Elo added to the home side on non-neutral ground (world_football)
 
 tournament:
   name: wc2026

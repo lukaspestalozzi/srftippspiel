@@ -132,11 +132,13 @@ def test_scoreline_from_rates_matches_elo_predictor():
 
 # --------------------------------------------------------------------------- build_predictor dispatch
 def test_build_predictor_dispatch():
+    ad = PredictorConfig(name="attack_defence_poisson", params={"rho": -0.1})
     cfg = Config(
-        predictor=PredictorConfig(name="attack_defence_poisson", params={"rho": -0.1}),
+        predictors={"attack_defence_poisson": ad},
         strategy=StrategyConfig(name="expected_points"),
         simulation=SimulationConfig(iterations=10, seed=1, penalty_model="coin_flip"),
         report=ReportConfig(output_dir="output", display_timezone="UTC"),
+        predictor=ad,
     )
     assert isinstance(build_predictor(cfg), AttackDefencePoissonPredictor)
 
@@ -159,5 +161,7 @@ def test_emit_teams_csv_writes_attack_defence(tmp_path):
                FileDataProvider(out, bundle.fixtures_file, bundle.results_file).get_teams()}
     assert emitted[teams[0].team_id].attack == pytest.approx(0.42)
     assert emitted[teams[0].team_id].defence == pytest.approx(-0.15)
+    # Attack/defence emission PRESERVES the official elo (does not overwrite it with `ratings`).
+    assert emitted[teams[0].team_id].elo == pytest.approx(teams[0].elo)
     # A team without a computed pair has no attack/defence.
     assert emitted[teams[5].team_id].attack is None

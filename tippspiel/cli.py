@@ -30,12 +30,14 @@ from .simulation.bracket import Bracket
 
 DEFAULT_CONFIG = "config.yaml"
 DEFAULT_BENCHMARKS = [
-    "configs/womenseuro2025.yaml",
+    "configs/euro2016.yaml",
     "configs/wc2022.yaml",
     "configs/euro2024.yaml",
     "configs/wc2018.yaml",
     "configs/euro2020.yaml",
 ]
+# Commands that build a Predictor and therefore require an explicit --predictor (no default).
+_PREDICTION_COMMANDS = {"run", "predict", "verify", "diagnose"}
 
 
 def _cmd_predict(cfg, bundle) -> int:
@@ -248,6 +250,13 @@ def _add_common_args(parser: argparse.ArgumentParser, *, with_default: bool) -> 
         help="override the tip strategy from the config (e.g. rank_optimizing); "
              "strategy params still come from the config (or built-in defaults)",
     )
+    parser.add_argument(
+        "--predictor", metavar="NAME",
+        default=(None if with_default else argparse.SUPPRESS),
+        help="prediction model to use (required for run/predict/verify/diagnose; no default): "
+             "elo_poisson (official eloratings) or attack_defence_poisson (computed ratings); "
+             "params come from the config 'predictors:' block",
+    )
 
 
 def _override_strategy(cfg, name: str | None):
@@ -257,6 +266,26 @@ def _override_strategy(cfg, name: str | None):
     from dataclasses import replace
 
     return replace(cfg, strategy=replace(cfg.strategy, name=name))
+
+
+def _select_predictor(cfg, command: str, name: str | None):
+    """Resolve the active predictor. There is no default: prediction commands require
+    ``--predictor``; ``tune`` always sweeps ``elo_poisson``; other commands need no predictor.
+    Returns ``(cfg, error_message_or_None)``."""
+    from .config import select_predictor
+
+    if command == "tune":
+        name = name or "elo_poisson"
+    elif command not in _PREDICTION_COMMANDS:
+        return cfg, None  # validate-data / build-elo don't build a predictor
+    if not name:
+        available = ", ".join(sorted(cfg.predictors))
+        return cfg, (f"{command}: --predictor is required (no default). "
+                     f"Choose one of: {available}.")
+    try:
+        return select_predictor(cfg, name), None
+    except ValueError as exc:
+        return cfg, f"{command}: {exc}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -298,6 +327,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cfg = load_config(config_path)
     cfg = _override_strategy(cfg, getattr(args, "strategy", None))
+    cfg, err = _select_predictor(cfg, args.command, getattr(args, "predictor", None))
+    if err:
+        print(err, file=sys.stderr)
+        return 2
     try:
         bundle = load_tournament(config_path)
     except (ValueError, KeyError) as exc:

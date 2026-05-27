@@ -17,10 +17,10 @@ from tippspiel.simulation.bracket import Bracket
 
 REPO = Path(tippspiel.__file__).parent.parent
 WC2026 = REPO / "config.yaml"
-WOMENSEURO = REPO / "configs" / "womenseuro2025.yaml"
+EURO2016 = REPO / "configs" / "euro2016.yaml"
 ALL_CONFIGS = [
     WC2026,
-    WOMENSEURO,
+    EURO2016,
     REPO / "configs" / "wc2022.yaml",
     REPO / "configs" / "euro2024.yaml",
     REPO / "configs" / "wc2018.yaml",
@@ -35,7 +35,7 @@ def _provider(bundle):
 
 def test_config_files_resolve_to_expected_tournaments():
     assert load_tournament(WC2026).name == "wc2026"
-    assert load_tournament(WOMENSEURO).name == "womenseuro2025"
+    assert load_tournament(EURO2016).name == "euro2016"
 
 
 def test_missing_file_raises():
@@ -48,17 +48,17 @@ def test_validate_data_passes_for_all_tournaments(config):
     assert validate_data(load_tournament(config)) == []
 
 
-def test_womenseuro_format_is_16_teams_no_thirds_qf_first():
-    b = load_tournament(WOMENSEURO)
+def test_euro2016_format_is_24_teams_best_thirds_r16_first():
+    b = load_tournament(EURO2016)
     assert b.completed is True
     teams = b.teams_file.read_text().strip().splitlines()[1:]  # minus header
-    assert len(teams) == 16
+    assert len(teams) == 24
     fixtures = _provider(b).get_fixtures()
     groups = {m.group for m in fixtures if m.group}
-    assert len(groups) == 4
+    assert len(groups) == 6
     ko_stages = {m.stage.value for m in fixtures if m.group is None}
-    assert "QF" in ko_stages and "R32" not in ko_stages   # quarter-finals are the first KO round
-    assert "THIRD_PLACE" not in ko_stages                 # no third-place playoff
+    assert "R16" in ko_stages and "R32" not in ko_stages   # round of 16 is the first KO round
+    assert "THIRD_PLACE" not in ko_stages                  # no third-place playoff
 
 
 def test_wc2026_format_is_48_teams_with_thirds_r32_first():
@@ -77,6 +77,6 @@ def test_wc2026_format_is_48_teams_with_thirds_r32_first():
 
 def test_bonus_questions_are_tournament_scoped():
     wc = load_tournament(WC2026)
-    we = load_tournament(WOMENSEURO)
+    eu = load_tournament(EURO2016)
     assert {q.id for q in wc.bonus_questions} >= {"champion", "swiss_progress"}
-    assert {q.id for q in we.bonus_questions} == {"champion"}
+    assert {q.id for q in eu.bonus_questions} == {"champion"}

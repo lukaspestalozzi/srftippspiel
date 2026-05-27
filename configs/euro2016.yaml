@@ -1,5 +1,5 @@
-# UEFA Euro 2024 (Germany) — completed tournament, a `tippspiel verify` backtest benchmark.
-# Run: tippspiel verify --config configs/euro2024.yaml
+# UEFA Euro 2016 (France) — completed tournament, a `tippspiel verify` backtest benchmark.
+# Run: tippspiel verify --config configs/euro2016.yaml --predictor elo_poisson
 # Format: 24 teams, 6 groups of 4, top 2 + 4 best thirds advance, R16 -> QF -> SF -> Final
 # (no third-place playoff). Knockout participants are concrete, so verify needs no bracket.
 
@@ -31,8 +31,8 @@ report:
 
 # Regenerate the attack/defence ratings read by attack_defence_poisson (--as-of defaults to the
 # tournament's start − 1 day, so the backtest has no result leakage):
-#   tippspiel build-elo --config configs/euro2024.yaml \
-#     --write-teams tippspiel/data/tournaments/euro2024/teams_attack_defence.csv
+#   tippspiel build-elo --config configs/euro2016.yaml \
+#     --write-teams tippspiel/data/tournaments/euro2016/teams_attack_defence.csv
 elo:
   model: attack_defence
   recency_decay: false
@@ -41,13 +41,13 @@ elo:
   ad_home_advantage: 0.0
 
 tournament:
-  name: euro2024
-  display_name: UEFA Euro 2024
+  name: euro2016
+  display_name: UEFA Euro 2016
   completed: true
-  data_dir: tournaments/euro2024
-  # Pre-tournament men's Elo (eloratings.net-style, ~June 2024); approximate, provisional.
+  data_dir: tournaments/euro2016
+  # Pre-tournament men's Elo (eloratings.net-style, ~June 2016); approximate, provisional.
   # Pre-tournament so the verification backtest has no result leakage.
-  elo_source: "eloratings.net men's snapshot ~June 2024; approximate, provisional"
+  elo_source: "eloratings.net men's snapshot ~June 2016; approximate, provisional"
 
 bonus_questions:
   - { id: champion, points: 50 }

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, load_tournament
+from tippspiel.config import load_config, load_tournament, select_predictor
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.model.scoreline import ScorelineDistribution
 from tippspiel.pipeline import _predict_tippable, build_predictor, build_strategy
@@ -126,7 +126,7 @@ def test_contrarian_bets_the_upset_against_a_favourite_heavy_field():
 
 # --------------------------------------------------------------------------- integration
 def test_integration_through_pipeline_on_wc2026_groups():
-    cfg = load_config(REPO / "config.yaml")
+    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
     bundle = load_tournament(REPO / "config.yaml")
     provider = FileDataProvider(
         bundle.teams_file, bundle.fixtures_file, bundle.results_file,
@@ -180,7 +180,7 @@ def test_report_context_carries_strategy_comparison(tmp_path):
     from tippspiel.pipeline import run_pipeline
     from tippspiel.report.html_writer import ReportWriter
 
-    cfg = load_config(REPO / "config.yaml")
+    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
     bundle = load_tournament(REPO / "config.yaml")
     # Active rank-optimising with a small world count keeps this fast.
     cfg = dataclasses.replace(
@@ -211,14 +211,13 @@ def test_report_context_carries_strategy_comparison(tmp_path):
 
 
 def test_build_strategy_dispatches_rank_optimizing():
+    import dataclasses
+
     cfg = load_config(REPO / "config.yaml")
     bundle = load_tournament(REPO / "config.yaml")
-    cfg = cfg.__class__(
-        predictor=cfg.predictor,
-        strategy=cfg.strategy.__class__(name="rank_optimizing", params={"n_worlds": 200}),
-        simulation=cfg.simulation,
-        report=cfg.report,
-        config_path=cfg.config_path,
+    cfg = dataclasses.replace(
+        cfg,
+        strategy=dataclasses.replace(cfg.strategy, name="rank_optimizing", params={"n_worlds": 200}),
     )
     strat = build_strategy(cfg, bundle)
     assert isinstance(strat, RankOptimizingStrategy)

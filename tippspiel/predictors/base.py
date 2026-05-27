@@ -14,6 +14,8 @@ from ..model.types import Match, MatchPrediction, Team
 
 class Predictor(ABC):
     name: str
+    # Which ratings file a tournament should feed this predictor (see TournamentBundle.teams_files).
+    ratings_kind: str = "elo"
 
     @abstractmethod
     def predict(self, match: Match, teams: dict[str, Team]) -> MatchPrediction:

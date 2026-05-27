@@ -54,10 +54,14 @@ class BonusQuestionConfig:
 
 @dataclass(frozen=True)
 class Config:
-    predictor: PredictorConfig
+    # Params for every available predictor, keyed by name. The active predictor is NOT defaulted
+    # here — it is chosen at runtime via ``--predictor`` and materialised into ``predictor`` by
+    # ``select_predictor`` (None until then).
+    predictors: dict[str, PredictorConfig]
     strategy: StrategyConfig
     simulation: SimulationConfig
     report: ReportConfig
+    predictor: PredictorConfig | None = None
     config_path: Path | None = None
 
 
@@ -74,6 +78,10 @@ class TournamentBundle:
     teams_file: Path
     fixtures_file: Path
     results_file: Path
+    # Ratings file per predictor ``ratings_kind`` (``elo`` -> the official eloratings snapshot,
+    # ``attack_defence`` -> the computed two-rating file). Resolved by convention in
+    # ``load_tournament``; ``teams_file`` is the fallback for any kind not listed.
+    teams_files: dict[str, Path] = field(default_factory=dict)
     thirds_allocation_file: Path | None = None
     bonus_questions: list[BonusQuestionConfig] = field(default_factory=list)
     elo_source: str = ""
@@ -99,11 +107,14 @@ def load_config(path: str | Path) -> Config:
             raise ValueError(
                 f"simulation.penalty_model must be one of {_VALID_PENALTY_MODELS}, got {penalty!r}"
             )
+        predictors = {
+            name: PredictorConfig(name=name, params=dict(spec or {}))
+            for name, spec in raw["predictors"].items()
+        }
+        if not predictors:
+            raise ValueError("config 'predictors:' block defines no predictors")
         cfg = Config(
-            predictor=PredictorConfig(
-                name=raw["predictor"]["name"],
-                params=dict(raw["predictor"].get("params", {})),
-            ),
+            predictors=predictors,
             strategy=StrategyConfig(
                 name=raw["strategy"]["name"],
                 params=dict(raw["strategy"].get("params", {})),
@@ -121,6 +132,20 @@ def load_config(path: str | Path) -> Config:
     return cfg
 
 
+def select_predictor(cfg: Config, name: str) -> Config:
+    """Return ``cfg`` with its active ``predictor`` set from the ``predictors`` map.
+
+    There is no default predictor: the name must be supplied (via ``--predictor``) and must be
+    one the config defines, else a clear error lists the available names.
+    """
+    from dataclasses import replace
+
+    if name not in cfg.predictors:
+        available = ", ".join(sorted(cfg.predictors)) or "(none)"
+        raise ValueError(f"Unknown predictor {name!r}; config defines: {available}")
+    return replace(cfg, predictor=cfg.predictors[name])
+
+
 def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> TournamentBundle:
     """Parse the ``tournament:`` block (+ ``bonus_questions:``) of a config file.
 
@@ -134,13 +159,23 @@ def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> Tourna
 
     data_dir = data_root / t["data_dir"]
     thirds = t.get("thirds_allocation_file")
+    teams_file = data_dir / t.get("teams_file", "teams.csv")
+    # Convention: official eloratings snapshot in ``teams.csv``, computed attack/defence ratings
+    # in ``teams_attack_defence.csv``. A ``tournament.teams_files`` block (kind -> filename) wins.
+    teams_files = {
+        "elo": teams_file,
+        "attack_defence": data_dir / "teams_attack_defence.csv",
+    }
+    for kind, fname in (t.get("teams_files") or {}).items():
+        teams_files[str(kind)] = data_dir / fname
     return TournamentBundle(
         name=t["name"],
         display_name=t.get("display_name", t["name"]),
         completed=bool(t.get("completed", False)),
-        teams_file=data_dir / t.get("teams_file", "teams.csv"),
+        teams_file=teams_file,
         fixtures_file=data_dir / t.get("fixtures_file", "fixtures.csv"),
         results_file=data_dir / t.get("results_file", "results.csv"),
+        teams_files=teams_files,
         thirds_allocation_file=(data_dir / thirds) if thirds else None,
         bonus_questions=[
             BonusQuestionConfig(id=q["id"], points=int(q["points"]))

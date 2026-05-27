@@ -27,6 +27,8 @@ CAVEATS = (
 
 
 def build_predictor(cfg: Config) -> Predictor:
+    if cfg.predictor is None:
+        raise ValueError("no predictor selected; pass --predictor (see config 'predictors:')")
     if cfg.predictor.name == "elo_poisson":
         return EloPoissonPredictor(**cfg.predictor.params)
     if cfg.predictor.name == "attack_defence_poisson":
@@ -34,6 +36,21 @@ def build_predictor(cfg: Config) -> Predictor:
 
         return AttackDefencePoissonPredictor(**cfg.predictor.params)
     raise ValueError(f"Unknown predictor: {cfg.predictor.name}")
+
+
+def ratings_file(predictor: Predictor, bundle: TournamentBundle) -> Path:
+    """The teams/ratings CSV the active predictor should read, by its ``ratings_kind``
+    (e.g. ``attack_defence`` -> ``teams_attack_defence.csv``). Falls back to the official
+    ``teams_file`` for any kind the tournament doesn't list; errors if the resolved file is
+    missing so a misconfigured model fails loudly rather than silently using the wrong ratings."""
+    kind = getattr(predictor, "ratings_kind", "elo")
+    path = bundle.teams_files.get(kind, bundle.teams_file)
+    if not Path(path).exists():
+        raise ValueError(
+            f"ratings file for predictor '{predictor.name}' (kind '{kind}') not found: {path}. "
+            f"For attack/defence, generate it with `tippspiel build-elo --write-teams {path}`."
+        )
+    return Path(path)
 
 
 def build_strategy(cfg: Config, bundle: TournamentBundle) -> TipStrategy:
@@ -80,8 +97,9 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     Returns the raw objects shared by the HTML report and the diagnostic report, so neither
     path has to rebuild them (and the diagnostic path can skip the expensive Plotly context).
     """
+    predictor = build_predictor(cfg)
     provider = FileDataProvider(
-        bundle.teams_file,
+        ratings_file(predictor, bundle),
         bundle.fixtures_file,
         bundle.results_file,
         bundle.thirds_allocation_file,
@@ -91,7 +109,6 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     results = {r.match_id: r for r in provider.get_results()}
     played = set(results)
 
-    predictor = build_predictor(cfg)
     strategy = build_strategy(cfg, bundle)
 
     outcome: TournamentOutcome | None = None
@@ -151,13 +168,13 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
     """Backtest the predictor against a completed tournament; write output/verify.{md,json}."""
     from .report.backtest import VerificationWriter, build_verification
 
+    predictor = build_predictor(cfg)
     provider = FileDataProvider(
-        bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+        ratings_file(predictor, bundle), bundle.fixtures_file, bundle.results_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
-    predictor = build_predictor(cfg)
     markdown, data = build_verification(bundle, teams, fixtures, results, predictor)
     paths = VerificationWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
@@ -228,10 +245,14 @@ def _emit_teams_csv(
     out_path: str | Path,
     pairs: dict[str, tuple[float, float]] | None = None,
 ) -> int:
-    """Write a teams.csv for the active tournament, overwriting the ``elo`` column from the
-    computed ratings (team_id/name/elo_trend preserved). When ``pairs`` is given (attack/defence
-    model) also write ``attack``/``defence`` columns. Reusing the tournament's own rows keeps the
-    name->id mapping authoritative and collision-free. Returns the count of overwritten rows."""
+    """Write a ratings CSV for the active tournament from the tournament's own teams.csv rows
+    (so the name->id mapping stays authoritative and collision-free). Returns the count of rows
+    matched to a computed rating.
+
+    Single-rating models (``pairs is None``) overwrite the ``elo`` column. The attack/defence
+    model (``pairs`` given) instead PRESERVES the official ``elo`` column untouched and only adds
+    ``attack``/``defence``, so the emitted ``teams_attack_defence.csv`` is a strict superset of the
+    official ``teams.csv`` (official elo + computed attack/defence)."""
     import csv
 
     from .elo.names import normalize
@@ -247,14 +268,16 @@ def _emit_teams_csv(
                 fieldnames.append(col)
     for row in rows:
         key = normalize(row["name"])
-        computed = ratings.get(key)
-        if computed is not None:
-            row["elo"] = f"{computed:.2f}"
-            written += 1
-        if pairs is not None and key in pairs:
+        if pairs is None:
+            computed = ratings.get(key)
+            if computed is not None:
+                row["elo"] = f"{computed:.2f}"
+                written += 1
+        elif key in pairs:
             atk, dfc = pairs[key]
             row["attack"] = f"{atk:.4f}"
             row["defence"] = f"{dfc:.4f}"
+            written += 1
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="") as fh:
@@ -347,6 +370,7 @@ def _build_report_context(
         "config": cfg.config_path.name if cfg.config_path else None,
         "predictor_name": predictor.name,
         "predictor_params": getattr(predictor, "params", {}),
+        "ratings_file": ratings_file(predictor, bundle).name,
         "strategy_name": cfg.strategy.name,
         "strategy_params": getattr(cfg.strategy, "params", {}),
         "elo_source": bundle.elo_source or None,

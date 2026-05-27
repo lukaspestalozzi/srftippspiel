@@ -21,6 +21,7 @@ from .elo_poisson import scoreline_from_rates
 
 class AttackDefencePoissonPredictor(Predictor):
     name = "attack_defence_poisson"
+    ratings_kind = "attack_defence"  # reads the computed Team.attack/Team.defence ratings
 
     def __init__(
         self,

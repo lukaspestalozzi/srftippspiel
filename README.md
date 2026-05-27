@@ -26,16 +26,18 @@ Requires Python 3.11+. Dependencies: numpy, plotly, jinja2, pyyaml (+ pytest for
 ## Usage
 
 ```bash
-tippspiel validate-data           # check input files for schema/consistency errors
-tippspiel predict                 # group-stage predictions + tips only (Phase 1, no sim)
-tippspiel run                     # full pipeline: predict + 50k simulations + report
-tippspiel verify                  # backtest the predictor on a completed tournament (pool points + calibration)
-tippspiel tune                    # sweep predictor params vs the completed-tournament backtests
-tippspiel run --config configs/womenseuro2025.yaml   # run for a different tournament
+tippspiel validate-data                              # check input files for schema/consistency errors
+tippspiel predict --predictor elo_poisson            # group-stage predictions + tips only (Phase 1, no sim)
+tippspiel run --predictor attack_defence_poisson     # full pipeline: predict + 50k simulations + report
+tippspiel verify --predictor elo_poisson             # backtest a predictor on a completed tournament
+tippspiel tune                                       # sweep elo_poisson params vs the completed-tournament backtests
+tippspiel run --config configs/euro2016.yaml --predictor elo_poisson   # a different tournament
 ```
 
-The report is written to `output/report.html` (configurable). A full `run` completes in a
-few seconds.
+The prediction model is a **required** `--predictor` flag (no default) for every command that
+predicts: `elo_poisson` uses the official eloratings snapshot (`teams.csv`); `attack_defence_poisson`
+uses the computed two-rating file (`teams_attack_defence.csv`). The report is written to
+`output/report.html` (configurable). A full `run` completes in a few seconds.
 
 ## Multiple tournaments & verification
 
@@ -45,16 +47,16 @@ settings plus a `tournament:` block (data folder, metadata, bonus questions). Se
 `--config <file>`. The engine derives the format from the data (group count/size from
 `fixtures.csv`; the knockout chain + thirds from the knockout fixtures' references), so it
 handles different shapes — the 48-team / best-8-thirds / R32-first World Cup 2026, the
-32-team **World Cup 2022**, the 24-team / best-thirds **Euro 2024**, and the 16-team / no-thirds
-/ QF-first **UEFA Women's Euro 2025** — without code changes. Add a tournament by dropping in a
-data folder + a config file.
+32-team **World Cup 2022**, and the 24-team / best-thirds **Euro 2024** and **Euro 2016** —
+without code changes. Add a tournament by dropping in a data folder + a config file.
 
-`tippspiel verify --config configs/<completed>.yaml` backtests predictor accuracy: it tips every
-actual match a-priori from the pre-tournament Elo snapshot and totals the **pool points** the
-tips would have scored against the real results, against a naive most-likely-scoreline baseline
-and the per-match maximum, plus **calibration** (tendency RPS + scoreline NLL). Five completed
-tournaments ship as seeded benchmarks — `womenseuro2025`, `wc2022`, `euro2024`, `wc2018` and
-`euro2020`; the model beats the naive baseline on all five. Output: `output/verify.{md,json}`.
+`tippspiel verify --config configs/<completed>.yaml --predictor <model>` backtests predictor
+accuracy: it tips every actual match a-priori from the pre-tournament ratings snapshot and totals
+the **pool points** the tips would have scored against the real results, against a naive
+most-likely-scoreline baseline and the per-match maximum, plus **calibration** (tendency RPS +
+scoreline NLL). Five completed men's tournaments ship as seeded benchmarks — `euro2016`, `wc2022`,
+`euro2024`, `wc2018` and `euro2020`; the model beats the naive baseline on all five. Output:
+`output/verify.{md,json}`.
 
 `tippspiel tune` sweeps the predictor parameters (`mu`, `k`, `rho`, `host_elo_bonus`,
 `ko_goal_scale`) over those benchmarks and writes a leaderboard (`output/tune.{md,json}`),

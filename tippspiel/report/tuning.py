@@ -36,7 +36,16 @@ def _iter_grid(grid: dict[str, list]):
 
 
 def _default_params(base_cfg) -> dict:
-    p = getattr(base_cfg.predictor, "params", {}) if base_cfg else {}
+    # Tuning sweeps elo_poisson; take its base params from the selected predictor if set,
+    # else from the config's elo_poisson entry (the grid is elo_poisson-specific).
+    p: dict = {}
+    if base_cfg is not None:
+        selected = getattr(base_cfg, "predictor", None)
+        if selected is not None and selected.name == "elo_poisson":
+            p = selected.params
+        else:
+            entry = getattr(base_cfg, "predictors", {}).get("elo_poisson")
+            p = entry.params if entry else {}
     return {
         "mu": p.get("mu", 2.6),
         "k": p.get("k", 0.0015),
