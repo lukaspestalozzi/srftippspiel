@@ -343,9 +343,13 @@ def _build_report_context(
 
     header = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "tournament": bundle.display_name,
+        "config": cfg.config_path.name if cfg.config_path else None,
         "predictor_name": predictor.name,
         "predictor_params": getattr(predictor, "params", {}),
         "strategy_name": cfg.strategy.name,
+        "strategy_params": getattr(cfg.strategy, "params", {}),
+        "elo_source": bundle.elo_source or None,
         "mc_iterations": outcome.mc_iterations if outcome else None,
         "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),

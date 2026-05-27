@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tippspiel Predictor — WC 2026</title>
+<title>Tippspiel Predictor — {{ header.tournament }}</title>
 <style>
   :root { --fg:#222; --muted:#666; --line:#e2e2e2; --accent:#2c7fb8; --tip:#e6550d; }
   * { box-sizing: border-box; }
@@ -51,7 +51,7 @@
 <body>
 <div class="wrap">
 
-  <h1>Tippspiel Predictor — FIFA World Cup 2026</h1>
+  <h1>Tippspiel Predictor — {{ header.tournament }}</h1>
   <p class="meta">
     Generated {{ header.generated_at }} ·
     Predictor <b>{{ header.predictor_name }}</b> ·
@@ -59,8 +59,12 @@
     {% if header.mc_iterations %} · MC {{ "{:,}".format(header.mc_iterations) }} iters (seed {{ header.mc_seed }}){% endif %}
     · {{ header.results_count }} result(s) incorporated
   </p>
-  <table class="kv meta"><tr><td>Predictor params</td>
-    <td><span class="pre">{{ header.predictor_params }}</span></td></tr></table>
+  <table class="kv meta">
+    <tr><td>Tournament</td><td>{{ header.tournament }}{% if header.config %} <span class="pre">({{ header.config }})</span>{% endif %}</td></tr>
+    <tr><td>Predictor</td><td><b>{{ header.predictor_name }}</b> <span class="pre">{{ header.predictor_params }}</span></td></tr>
+    <tr><td>Strategy</td><td><b>{{ header.strategy_name }}</b>{% if header.strategy_params %} <span class="pre">{{ header.strategy_params }}</span>{% endif %}</td></tr>
+    <tr><td>Elo source</td><td>{{ header.elo_source or "—" }}</td></tr>
+  </table>
 
   <div class="toc">
     <b>Contents</b>
