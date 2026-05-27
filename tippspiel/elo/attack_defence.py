@@ -50,11 +50,6 @@ class AttackDefenceElo(RatingModel):
         lam_a = math.exp(c + self._atk[m.away] - self._def[m.home])
         return lam_h, lam_a
 
-    def expected(self, m: HistoricalMatch) -> float:
-        """Tendency We in [0, 1] from the rate difference (for the ranking report only)."""
-        lam_h, lam_a = self._rates(m)
-        return lam_h / (lam_h + lam_a)
-
     def update(self, m: HistoricalMatch) -> None:
         lam_h, lam_a = self._rates(m)
         lr = self.cfg.learning_rate * m.weight

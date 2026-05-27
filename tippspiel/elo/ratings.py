@@ -19,10 +19,6 @@ class RatingModel(ABC):
         """Initialize state for a newly-seen team (idempotent)."""
 
     @abstractmethod
-    def expected(self, match: HistoricalMatch) -> float:
-        """Expected home result We in [0, 1] given current state + venue."""
-
-    @abstractmethod
     def update(self, match: HistoricalMatch) -> None:
         """Fold ONE chronological match into team state (honouring ``match.weight``)."""
 
