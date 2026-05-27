@@ -29,6 +29,10 @@ CAVEATS = (
 def build_predictor(cfg: Config) -> Predictor:
     if cfg.predictor.name == "elo_poisson":
         return EloPoissonPredictor(**cfg.predictor.params)
+    if cfg.predictor.name == "attack_defence_poisson":
+        from .predictors.attack_defence import AttackDefencePoissonPredictor
+
+        return AttackDefencePoissonPredictor(**cfg.predictor.params)
     raise ValueError(f"Unknown predictor: {cfg.predictor.name}")
 
 
@@ -218,10 +222,16 @@ def _resolve_as_of(as_of: str | None, bundle: TournamentBundle) -> date:
     return date.today()
 
 
-def _emit_teams_csv(bundle: TournamentBundle, ratings: dict[str, float], out_path: str | Path) -> int:
-    """Write a teams.csv for the active tournament, overwriting ONLY the ``elo`` column from the
-    computed ratings (team_id/name/elo_trend preserved). Reusing the tournament's own rows keeps
-    the name->id mapping authoritative and collision-free. Returns the count of overwritten rows."""
+def _emit_teams_csv(
+    bundle: TournamentBundle,
+    ratings: dict[str, float],
+    out_path: str | Path,
+    pairs: dict[str, tuple[float, float]] | None = None,
+) -> int:
+    """Write a teams.csv for the active tournament, overwriting the ``elo`` column from the
+    computed ratings (team_id/name/elo_trend preserved). When ``pairs`` is given (attack/defence
+    model) also write ``attack``/``defence`` columns. Reusing the tournament's own rows keeps the
+    name->id mapping authoritative and collision-free. Returns the count of overwritten rows."""
     import csv
 
     from .elo.names import normalize
@@ -229,13 +239,22 @@ def _emit_teams_csv(bundle: TournamentBundle, ratings: dict[str, float], out_pat
     written = 0
     with Path(bundle.teams_file).open(newline="") as fh:
         reader = csv.DictReader(fh)
-        fieldnames = reader.fieldnames or []
+        fieldnames = list(reader.fieldnames or [])
         rows = [row for row in reader if (row.get("team_id") or "").strip()]
+    if pairs is not None:
+        for col in ("attack", "defence"):
+            if col not in fieldnames:
+                fieldnames.append(col)
     for row in rows:
-        computed = ratings.get(normalize(row["name"]))
+        key = normalize(row["name"])
+        computed = ratings.get(key)
         if computed is not None:
             row["elo"] = f"{computed:.2f}"
             written += 1
+        if pairs is not None and key in pairs:
+            atk, dfc = pairs[key]
+            row["attack"] = f"{atk:.4f}"
+            row["defence"] = f"{dfc:.4f}"
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="") as fh:
@@ -256,10 +275,9 @@ def build_elo(
 ) -> dict:
     """Fetch + normalize ~25y of results, run the World Football Elo forward pass, write
     ``output/elo.{md,json}``, and optionally emit a computed teams.csv for the active tournament."""
-    from .elo import build_model, get_results_csv, parse_csv_text, prepare_matches
+    from .elo import build_model, get_results_csv, parse_csv_text, prepare_matches, run_forward_pass
     from .elo.config import load_elo_config
     from .elo.names import build_canonical_map
-    from .elo.ratings import build_ratings
     from .report.elo_report import EloReportWriter, build_elo_report
 
     elo_cfg = bundle.elo or load_elo_config({})
@@ -269,7 +287,9 @@ def build_elo(
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
     all_matches = parse_csv_text(text)
     matches = prepare_matches(all_matches, as_of_date, elo_cfg)
-    ratings = build_ratings(matches, build_model(elo_cfg))
+    model = run_forward_pass(matches, build_model(elo_cfg))
+    ratings = model.ratings()
+    pairs = model.attack_defence_ratings() if hasattr(model, "attack_defence_ratings") else None
 
     provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
     current_teams = provider.get_teams()
@@ -294,7 +314,7 @@ def build_elo(
 
     result = {"paths": paths, "data": data, "ratings": ratings}
     if write_teams:
-        result["teams_written"] = _emit_teams_csv(bundle, ratings, write_teams)
+        result["teams_written"] = _emit_teams_csv(bundle, ratings, write_teams, pairs=pairs)
         result["teams_path"] = write_teams
     return result
 

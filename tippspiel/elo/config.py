@@ -49,6 +49,12 @@ class EloConfig:
     model: str = "world_football"
     tier_k: list[tuple[str, float]] = field(default_factory=lambda: list(DEFAULT_TIER_K))
     tier_k_fallback: float = DEFAULT_TIER_K_FALLBACK
+    # Attack/defence model (model == "attack_defence"): online Poisson-likelihood SGD.
+    # Defaults tuned on the men's completed-tournament backtests (full history, recency off).
+    learning_rate: float = 0.03
+    base_log_rate: float = 0.3  # c ~ log(avg goals/side)
+    ad_home_advantage: float = 0.0  # log-goal-scale home advantage (0 tuned best on neutral-venue events)
+    ad_shrinkage: float = 0.0  # per-update pull toward 0 (regularisation)
 
 
 def _coerce_tier_k(tier_k) -> list[tuple[str, float]]:
@@ -72,4 +78,8 @@ def load_elo_config(raw_elo: dict | None) -> EloConfig:
         model=raw.get("model", "world_football"),
         tier_k=_coerce_tier_k(tier_k) if tier_k is not None else list(DEFAULT_TIER_K),
         tier_k_fallback=float(raw.get("tier_k_fallback", DEFAULT_TIER_K_FALLBACK)),
+        learning_rate=float(raw.get("learning_rate", 0.03)),
+        base_log_rate=float(raw.get("base_log_rate", 0.3)),
+        ad_home_advantage=float(raw.get("ad_home_advantage", 0.0)),
+        ad_shrinkage=float(raw.get("ad_shrinkage", 0.0)),
     )

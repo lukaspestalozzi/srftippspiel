@@ -48,12 +48,16 @@ class FileDataProvider(DataProvider):
                 if not row.get("team_id"):
                     continue
                 trend = row.get("elo_trend", "").strip()
+                atk = (row.get("attack") or "").strip()
+                dfc = (row.get("defence") or "").strip()
                 teams.append(
                     Team(
                         team_id=row["team_id"].strip(),
                         name=row["name"].strip(),
                         elo=float(row["elo"]),
                         elo_trend=float(trend) if trend else None,
+                        attack=float(atk) if atk else None,
+                        defence=float(dfc) if dfc else None,
                     )
                 )
         return teams

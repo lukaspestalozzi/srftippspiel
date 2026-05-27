@@ -38,14 +38,17 @@ class RatingModel(ABC):
         return {t: self.rating(t) for t in self.teams()}
 
 
-def build_ratings(matches: Iterable[HistoricalMatch], model: RatingModel) -> dict[str, float]:
-    """Run the single chronological forward pass and return team -> scalar Elo.
-
-    Matches are sorted by ``(date, home, away)`` so the result is deterministic regardless of
-    input order.
-    """
+def run_forward_pass(matches: Iterable[HistoricalMatch], model: RatingModel) -> RatingModel:
+    """Fold the matches into ``model`` in ``(date, home, away)`` order (deterministic regardless of
+    input order) and return the model, so callers can read scalar ratings *or* a richer state
+    (e.g. attack/defence pairs)."""
     for m in sorted(matches, key=lambda x: (x.date, x.home, x.away)):
         model.seed(m.home)
         model.seed(m.away)
         model.update(m)
-    return model.ratings()
+    return model
+
+
+def build_ratings(matches: Iterable[HistoricalMatch], model: RatingModel) -> dict[str, float]:
+    """Run the chronological forward pass and return team -> scalar Elo."""
+    return run_forward_pass(matches, model).ratings()

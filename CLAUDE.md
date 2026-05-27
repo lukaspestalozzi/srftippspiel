@@ -80,13 +80,37 @@ K — both in the config `elo:` block). Writes a ranking + computed-vs-current c
 tournament opts in by pointing `tournament.teams_file` at the emitted file — the predictor reads
 `Team.elo` unchanged, so integration is **data + config only**. Default `--as-of` is today, or a
 completed tournament's start date − 1 day (no result leakage). Code: `tippspiel/elo/` (the
-`RatingModel` ABC in `ratings.py` is the seam for a **future offence/defence model** — two ratings
-per team behind the same interface; `world_football.py` is the current single-rating
-implementation) + `tippspiel/report/elo_report.py`. Country-name→team_id normalization +
-aliases live in `elo/names.py`. The reconstruction won't equal eloratings.net exactly and its
-spread is tighter (windowing + decay compress it), so **re-run `tune`** before adopting a computed
-source for live predictions — a constant offset cancels in `elo_home − elo_away`, but the
-narrower spread shifts the optimal `k`.
+`RatingModel` ABC in `ratings.py` is the seam between rating schemes; `world_football.py` is the
+single-rating implementation, `attack_defence.py` the two-rating one — see below) +
+`tippspiel/report/elo_report.py`. The chronological fold lives in `run_forward_pass` (callers read
+either scalar `ratings()` or, for attack/defence, the `(atk, def)` pairs). Country-name→team_id
+normalization + aliases live in `elo/names.py`. The reconstruction won't equal eloratings.net
+exactly and its spread is tighter (windowing + decay compress it), so **re-run `tune`** before
+adopting a computed source for live predictions — a constant offset cancels in `elo_home −
+elo_away`, but the narrower spread shifts the optimal `k`.
+
+### Attack/defence model (`model: attack_defence`) — beats eloratings on pool points
+
+The single-rating reconstruction **can't beat the eloratings.net snapshots** on the men's backtests
+(best ~0.201 vs 0.194 RPS), and **recency weighting *hurts* accuracy** (full history with decay off
+is best — the "weight recent matches more heavily" knob is a net negative for prediction). So the
+recommended computed source is the **attack/defence** model (`elo/attack_defence.py`,
+`AttackDefenceElo`): two ratings per team (offence + defence) fit online by **SGD on the Poisson
+log-likelihood** of match goals — the gradient wrt each log-rate is `(observed − expected)`, giving
+`atk[h] += lr·w·(gh−λh); def[a] −= lr·w·(gh−λh)` (and symmetrically for the away goals; `w` is the
+recency weight, optional `ad_shrinkage` regularises). It maps natively onto the Poisson predictor:
+`AttackDefencePoissonPredictor` (`predictors/attack_defence.py`, `attack_defence_poisson`) sets
+`λ_home = exp(c + atk_home − def_away + ha·host)`, `λ_away = exp(c + atk_away − def_home)` and reuses
+the shared `scoreline_from_rates` matrix builder. Ratings ride in new optional `Team.attack`/
+`Team.defence` columns (emitted by `build-elo --write-teams` when the model is attack/defence;
+absent ⇒ predictor falls back to the base rate). **Result on the 4 men's completed tournaments
+(full history, recency off, `learning_rate=0.03`, `ad_home_advantage=0`, predictor `rho=-0.10`,
+`ko_goal_scale=1.2`): pooled pool-points %max 46.4 vs eloratings 44.5 (+1.9pp), winning 3 of 4
+(loses only WC2022, the famous-upset edition), at parity RPS (0.1965 vs 0.1942).** The dataset is
+men-only, so the women's tournament stays on its eloratings snapshot. Select it per tournament:
+`elo: { model: attack_defence, recency_decay: false, lookback_years: 200 }` +
+`predictor: { name: attack_defence_poisson, params: { rho: -0.1, ko_goal_scale: 1.2 } }`, then point
+`teams_file` at a `build-elo --write-teams` output.
 
 ## The diagnostic report — my primary analysis tool
 

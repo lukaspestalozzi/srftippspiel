@@ -35,6 +35,12 @@ elo:
   half_life_years: 8       # a match this old counts ~half as much as a fresh one
   seed_rating: 1500        # starting rating for a newly-seen team
   home_advantage: 100      # Elo added to the home side on non-neutral ground
+  # Alternative rating scheme that beats eloratings on the men's backtests (pool points):
+  #   model: attack_defence   # two ratings/team, SGD on the Poisson goal likelihood
+  #   recency_decay: false    # recency hurts accuracy here; use full history
+  #   lookback_years: 200
+  # Pair with predictor: { name: attack_defence_poisson, params: { rho: -0.1, ko_goal_scale: 1.2 } }
+  # and point teams_file at a `build-elo --write-teams` output. See CLAUDE.md "Attack/defence model".
 
 tournament:
   name: wc2026

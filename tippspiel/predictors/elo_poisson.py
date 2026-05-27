@@ -30,6 +30,18 @@ def _poisson_pmf_vector(lam: float, gmax: int) -> np.ndarray:
     return np.exp(log_pmf)
 
 
+def scoreline_from_rates(lambda_h: float, lambda_a: float, gmax: int, rho: float) -> np.ndarray:
+    """Independent-Poisson scoreline matrix P(h, a) over [0, gmax]^2, optionally Dixon-Coles
+    corrected and renormalised. Shared by the Elo and attack/defence predictors."""
+    ph = _poisson_pmf_vector(lambda_h, gmax)
+    pa = _poisson_pmf_vector(lambda_a, gmax)
+    matrix = np.outer(ph, pa)
+    if rho != 0.0:
+        matrix = _apply_dixon_coles(matrix, lambda_h, lambda_a, rho)
+    matrix = np.clip(matrix, 0.0, None)
+    return matrix / matrix.sum()
+
+
 class EloPoissonPredictor(Predictor):
     name = "elo_poisson"
 
@@ -70,13 +82,7 @@ class EloPoissonPredictor(Predictor):
         return lambda_h, lambda_a
 
     def scoreline_matrix(self, lambda_h: float, lambda_a: float) -> np.ndarray:
-        ph = _poisson_pmf_vector(lambda_h, self.gmax)
-        pa = _poisson_pmf_vector(lambda_a, self.gmax)
-        matrix = np.outer(ph, pa)
-        if self.rho != 0.0:
-            matrix = _apply_dixon_coles(matrix, lambda_h, lambda_a, self.rho)
-        matrix = np.clip(matrix, 0.0, None)
-        return matrix / matrix.sum()
+        return scoreline_from_rates(lambda_h, lambda_a, self.gmax, self.rho)
 
     def predict(self, match: Match, teams: dict[str, Team]) -> MatchPrediction:
         if not match.participants_known:

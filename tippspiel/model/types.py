@@ -18,6 +18,10 @@ class Team:
     name: str
     elo: float
     elo_trend: float | None = None
+    # Optional attack/defence ratings (log-goal scale) for AttackDefencePoissonPredictor;
+    # absent for eloratings/World-Football single-rating tournaments.
+    attack: float | None = None
+    defence: float | None = None
 
 
 @dataclass(frozen=True)

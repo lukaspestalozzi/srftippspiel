@@ -5,10 +5,11 @@ Pipeline: fetch results.csv -> parse + normalize names -> window + recency-decay
 seam for a future attack/defence model; ``build_model`` selects the implementation by config.
 """
 
+from .attack_defence import AttackDefenceElo
 from .config import EloConfig, load_elo_config
 from .fetch import get_results_csv
 from .matches import HistoricalMatch, parse_csv_text, prepare_matches
-from .ratings import RatingModel, build_ratings
+from .ratings import RatingModel, build_ratings, run_forward_pass
 from .world_football import WorldFootballElo
 
 __all__ = [
@@ -20,7 +21,9 @@ __all__ = [
     "prepare_matches",
     "RatingModel",
     "build_ratings",
+    "run_forward_pass",
     "WorldFootballElo",
+    "AttackDefenceElo",
     "build_model",
 ]
 
@@ -29,4 +32,6 @@ def build_model(cfg: EloConfig) -> RatingModel:
     """Construct the rating model named by ``cfg.model``."""
     if cfg.model == "world_football":
         return WorldFootballElo(cfg)
+    if cfg.model == "attack_defence":
+        return AttackDefenceElo(cfg)
     raise ValueError(f"Unknown elo model: {cfg.model!r}")
