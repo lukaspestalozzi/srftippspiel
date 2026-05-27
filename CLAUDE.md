@@ -23,6 +23,7 @@ tippspiel diagnose          # the Claude diagnostic report (see below) -> output
 tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
 tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
 tippspiel tune              # sweep predictor params vs the completed-tournament backtests -> output/tune.{md,json}
+tippspiel build-elo         # compute World Football Elo from ~25y of historical results -> output/elo.{md,json}
 ```
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
@@ -64,6 +65,28 @@ check. The current `config.yaml` params are the tuned result. Code: `tippspiel/r
 Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
 goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
 advantage applies when a team plays in its own country (`venue_country == home.team_id`).
+
+## Elo builder (`build-elo`)
+
+`tippspiel build-elo` recomputes team Elo from scratch instead of trusting the eloratings.net
+snapshot in `teams.csv`. It fetches ~25y of international results at runtime (the
+`martj42/international_results` CSV, cached under `~/.cache/tippspiel`), runs the **World Football
+Elo** algorithm (logistic expectation, goal-difference multiplier, importance-tiered K from the
+`tournament` column, +home advantage on non-neutral ground, zero-sum updates) over a chronological
+forward pass, **weighting recent matches more heavily** (a lookback window + a half-life decay on
+K — both in the config `elo:` block). Writes a ranking + computed-vs-current comparison to
+`output/elo.{md,json}`; with `--write-teams PATH` it emits a `teams.csv` (overwriting only the
+`elo` column, reusing the tournament's own rows so the name→id map stays collision-free). A
+tournament opts in by pointing `tournament.teams_file` at the emitted file — the predictor reads
+`Team.elo` unchanged, so integration is **data + config only**. Default `--as-of` is today, or a
+completed tournament's start date − 1 day (no result leakage). Code: `tippspiel/elo/` (the
+`RatingModel` ABC in `ratings.py` is the seam for a **future offence/defence model** — two ratings
+per team behind the same interface; `world_football.py` is the current single-rating
+implementation) + `tippspiel/report/elo_report.py`. Country-name→team_id normalization +
+aliases live in `elo/names.py`. The reconstruction won't equal eloratings.net exactly and its
+spread is tighter (windowing + decay compress it), so **re-run `tune`** before adopting a computed
+source for live predictions — a constant offset cancels in `elo_home − elo_away`, but the
+narrower spread shifts the optimal `k`.
 
 ## The diagnostic report — my primary analysis tool
 

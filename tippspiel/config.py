@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+from .elo.config import EloConfig, load_elo_config
+
 _DATA_ROOT = Path(__file__).parent / "data"
 
 
@@ -75,6 +77,7 @@ class TournamentBundle:
     thirds_allocation_file: Path | None = None
     bonus_questions: list[BonusQuestionConfig] = field(default_factory=list)
     elo_source: str = ""
+    elo: EloConfig | None = None
 
 
 _VALID_PENALTY_MODELS = {"coin_flip", "elo_weighted"}
@@ -144,4 +147,5 @@ def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> Tourna
             for q in raw.get("bonus_questions", [])
         ],
         elo_source=t.get("elo_source", ""),
+        elo=load_elo_config(raw.get("elo")),
     )

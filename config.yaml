@@ -26,6 +26,16 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
+# `tippspiel build-elo` recomputes World Football Elo from ~25y of historical results, weighting
+# recent matches more heavily. All keys are optional (defaults shown). `tier_k` maps the dataset's
+# competition name to an importance K via an ordered first-match-wins substring scan.
+elo:
+  lookback_years: 25       # only matches within this window count
+  recency_decay: true      # weight recent matches more heavily
+  half_life_years: 8       # a match this old counts ~half as much as a fresh one
+  seed_rating: 1500        # starting rating for a newly-seen team
+  home_advantage: 100      # Elo added to the home side on non-neutral ground
+
 tournament:
   name: wc2026
   display_name: FIFA World Cup 2026

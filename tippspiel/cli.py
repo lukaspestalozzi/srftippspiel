@@ -19,6 +19,7 @@ from pathlib import Path
 from .config import load_config, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import (
+    build_elo,
     run_pipeline,
     run_tuning,
     write_diagnostics,
@@ -112,6 +113,27 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     print("recommended params:")
     for key, val in data["recommended_params"].items():
         print(f"  {key}: {val}")
+    return 0
+
+
+def _cmd_build_elo(cfg, bundle, args) -> int:
+    result = build_elo(
+        cfg, bundle,
+        as_of=args.as_of, write_teams=args.write_teams,
+        top=args.top, cache_only=args.cache_only,
+    )
+    paths, data = result["paths"], result["data"]
+    m = data["meta"]
+    print(f"[{bundle.display_name}] computed Elo for {m['n_teams_rated']} teams from "
+          f"{m['n_matches_used']} matches (as of {m['as_of']}, lookback {m['lookback_years']}y, "
+          + (f"half-life {m['half_life_years']}y)." if m["recency_decay"] else "no decay)."))
+    print(f"Report written to {paths['markdown']} (+ {paths['json'].name}).")
+    print("Top 5:")
+    for r in data["ranking"][:5]:
+        tag = f"  [{r['team_id']}]" if r["team_id"] else ""
+        print(f"  {r['rank']:>2}. {r['name']:<22} {r['elo']:.1f}{tag}")
+    if "teams_path" in result:
+        print(f"Emitted {result['teams_written']} computed teams -> {result['teams_path']}")
     return 0
 
 
@@ -258,6 +280,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="completed-tournament config files to tune against "
                            f"(default: {', '.join(DEFAULT_BENCHMARKS)})")
     tune.add_argument("--top", type=int, default=15, help="leaderboard size (default: 15)")
+    be = sub.add_parser("build-elo", help="compute World Football Elo from historical results")
+    _add_common_args(be, with_default=False)
+    be.add_argument("--as-of", metavar="DATE", default=None,
+                    help="snapshot date YYYY-MM-DD (default: today, or a completed tournament's "
+                         "start date)")
+    be.add_argument("--write-teams", metavar="PATH", default=None,
+                    help="also emit a teams.csv for the active tournament with the computed elo")
+    be.add_argument("--top", type=int, default=30, help="ranking report size (default: 30)")
+    be.add_argument("--cache-only", action="store_true",
+                    help="use the cached results.csv only; do not fetch")
     args = parser.parse_args(argv)
 
     config_path = args.config
@@ -285,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
         if args.command == "tune":
             return _cmd_tune(cfg, args.benchmarks, args.top)
+        if args.command == "build-elo":
+            return _cmd_build_elo(cfg, bundle, args)
     except ValueError as exc:
         print(f"{args.command}: {exc}", file=sys.stderr)
         return 1

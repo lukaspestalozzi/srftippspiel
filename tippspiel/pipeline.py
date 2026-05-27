@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hashlib
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from .config import Config, TournamentBundle
 from .data.file_provider import FileDataProvider
@@ -200,6 +202,101 @@ def _strategy_comparison(cfg, predictions, fixtures):
         "pool_size": comp.pool_size, "top_n": comp.top_n,
     }
     return summary, compare_map
+
+
+def _resolve_as_of(as_of: str | None, bundle: TournamentBundle) -> date:
+    """Snapshot date for the forward pass. Explicit ``--as-of`` wins; otherwise a completed
+    tournament uses its earliest fixture date minus one day (so the pass cannot leak the
+    tournament's own results), and an unplayed tournament uses today."""
+    if as_of:
+        return date.fromisoformat(as_of)
+    if bundle.completed:
+        provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+        kickoffs = [m.kickoff for m in provider.get_fixtures()]
+        if kickoffs:
+            return min(kickoffs).date() - timedelta(days=1)
+    return date.today()
+
+
+def _emit_teams_csv(bundle: TournamentBundle, ratings: dict[str, float], out_path: str | Path) -> int:
+    """Write a teams.csv for the active tournament, overwriting ONLY the ``elo`` column from the
+    computed ratings (team_id/name/elo_trend preserved). Reusing the tournament's own rows keeps
+    the name->id mapping authoritative and collision-free. Returns the count of overwritten rows."""
+    import csv
+
+    from .elo.names import normalize
+
+    written = 0
+    with Path(bundle.teams_file).open(newline="") as fh:
+        reader = csv.DictReader(fh)
+        fieldnames = reader.fieldnames or []
+        rows = [row for row in reader if (row.get("team_id") or "").strip()]
+    for row in rows:
+        computed = ratings.get(normalize(row["name"]))
+        if computed is not None:
+            row["elo"] = f"{computed:.2f}"
+            written += 1
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return written
+
+
+def build_elo(
+    cfg: Config,
+    bundle: TournamentBundle,
+    *,
+    as_of: str | None = None,
+    write_teams: str | None = None,
+    top: int = 30,
+    cache_only: bool = False,
+) -> dict:
+    """Fetch + normalize ~25y of results, run the World Football Elo forward pass, write
+    ``output/elo.{md,json}``, and optionally emit a computed teams.csv for the active tournament."""
+    from .elo import build_model, get_results_csv, parse_csv_text, prepare_matches
+    from .elo.config import load_elo_config
+    from .elo.names import build_canonical_map
+    from .elo.ratings import build_ratings
+    from .report.elo_report import EloReportWriter, build_elo_report
+
+    elo_cfg = bundle.elo or load_elo_config({})
+    as_of_date = _resolve_as_of(as_of, bundle)
+
+    text = get_results_csv(elo_cfg, cache_only=cache_only)
+    content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    all_matches = parse_csv_text(text)
+    matches = prepare_matches(all_matches, as_of_date, elo_cfg)
+    ratings = build_ratings(matches, build_model(elo_cfg))
+
+    provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+    current_teams = provider.get_teams()
+    canonical_map, conflicts = build_canonical_map(bundle.teams_file.parents[2])
+
+    meta = {
+        "as_of": as_of_date.isoformat(),
+        "model": elo_cfg.model,
+        "lookback_years": elo_cfg.lookback_years,
+        "recency_decay": elo_cfg.recency_decay,
+        "half_life_years": elo_cfg.half_life_years,
+        "source_url": elo_cfg.source_url,
+        "content_hash": content_hash,
+        "n_matches_total": len(all_matches),
+        "n_matches_used": len(matches),
+        "n_teams_rated": len(ratings),
+    }
+    markdown, data = build_elo_report(
+        bundle, ratings, current_teams, canonical_map, conflicts, meta, top=top
+    )
+    paths = EloReportWriter().write(markdown, data, cfg.report.output_dir)
+
+    result = {"paths": paths, "data": data, "ratings": ratings}
+    if write_teams:
+        result["teams_written"] = _emit_teams_csv(bundle, ratings, write_teams)
+        result["teams_path"] = write_teams
+    return result
 
 
 def _build_report_context(
