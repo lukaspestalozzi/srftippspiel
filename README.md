@@ -131,16 +131,30 @@ A pipeline with two designed-for-extension seams:
   `EloPoissonPredictor` (multiplicative goal rates, optional Dixon-Coles low-score
   correction). Host-venue advantage is configurable (`host_elo_bonus`, default 0).
 - **`TipStrategy`** (`strategy/`) — the whole slate of predictions + tournament outcome →
-  a complete set of tips. Ships `ExpectedPointsStrategy`.
+  a complete set of tips. Ships `ExpectedPointsStrategy` (maximise own expected points) and
+  `RankOptimizingStrategy` (maximise the probability of *winning* the pool — see below).
 
 The `TournamentSimulator` (`simulation/`) runs the vectorised Monte Carlo: group standings
 with exact FIFA tiebreakers (criteria 1–4; criterion 5 via a named seeded random
 tiebreak), best-8 third-placed selection, bracket assembly, and knockout progression.
 
-### Phase 3 (stubbed, not implemented)
+### Rank-optimising strategy (anticipating the field)
 
-`MarketOddsPredictor`, `RankOptimizingStrategy` and `FieldModel` are abstract/`NotImplementedError`
-stubs. The interfaces already accommodate them, so Phase 3 slots in without refactoring.
+In a large pool (~200,000 entrants), the EV-maximising slate scores well but rarely *wins* —
+thousands of sharp entrants converge on the same EV-optimal scorelines. `RankOptimizingStrategy`
+instead maximises `P(rank ≤ top_n)` by modelling how the field tips (`FieldModel`, default
+`PredictorDerivedFieldModel`) and deliberately taking contrarian variance where it raises the
+win probability. Enable it with `strategy: { name: rank_optimizing, params: { pool_size: 200000,
+top_n: 1, expert_fraction: 0.6, temperature: 1.5 } }`; the default strategy remains
+`expected_points`. `tippspiel diagnose` reports an EV-vs-rank comparison (estimated win
+probability, expected points, and the contrarian deviations). The field model is derived from
+the predictor (no real pool-tip data exists) and is a documented assumption.
+
+### Phase 3 (partially implemented)
+
+`RankOptimizingStrategy` and `FieldModel` are implemented (above). `MarketOddsPredictor` remains
+an abstract/`NotImplementedError` stub; its interface already accommodates Phase 3 without
+refactoring.
 
 ## Testing
 

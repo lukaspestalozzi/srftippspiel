@@ -33,6 +33,23 @@ def build_predictor(cfg: Config) -> Predictor:
 def build_strategy(cfg: Config, bundle: TournamentBundle) -> TipStrategy:
     if cfg.strategy.name == "expected_points":
         return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
+    if cfg.strategy.name == "rank_optimizing":
+        from .strategy.rank_optimizing import PredictorDerivedFieldModel, RankOptimizingStrategy
+
+        p = cfg.strategy.params
+        field_model = PredictorDerivedFieldModel(
+            expert_fraction=p.get("expert_fraction", 0.6),
+            temperature=p.get("temperature", 1.5),
+        )
+        return RankOptimizingStrategy(
+            field_model=field_model,
+            pool_size=p.get("pool_size", 200_000),
+            top_n=p.get("top_n", 1),
+            n_worlds=p.get("n_worlds", 10_000),
+            candidates_per_match=p.get("candidates_per_match", 6),
+            seed=cfg.simulation.seed,
+            bonus_question_configs=bundle.bonus_questions,
+        )
     raise ValueError(f"Unknown strategy: {cfg.strategy.name}")
 
 
@@ -158,11 +175,41 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
+def _strategy_comparison(cfg, predictions, fixtures):
+    """EV-optimal vs rank-optimised slate for the report: a per-match ``compare_map`` (marking
+    where the two strategies deviate) and an aggregate summary. ``(None, {})`` when nothing is
+    tippable. Runs regardless of the active strategy so the report always shows both."""
+    from .strategy.rank_optimizing import comparison_from_params
+
+    params = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
+    comp = comparison_from_params(predictions, fixtures, params, seed=cfg.simulation.seed)
+    if comp is None:
+        return None, {}
+    compare_map = {}
+    for mid, ev in comp.ev_slate.items():
+        rk = comp.rank_slate[mid]
+        compare_map[mid] = {
+            "ev_home": ev[0], "ev_away": ev[1],
+            "rank_home": rk[0], "rank_away": rk[1],
+            "differs": ev != rk,
+        }
+    summary = {
+        "ev_p_win": comp.ev_p_win, "rank_p_win": comp.rank_p_win,
+        "ev_total_ev": comp.ev_total_ev, "rank_total_ev": comp.rank_total_ev,
+        "n_diff": comp.n_diff, "n_tippable": len(comp.ev_slate),
+        "pool_size": comp.pool_size, "top_n": comp.top_n,
+    }
+    return summary, compare_map
+
+
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor
 ) -> dict:
-    groups = _group_sections(teams, fixtures, results, predictions, tipset, outcome)
-    knockout_fixtures = _knockout_sections(teams, fixtures, results, predictions, tipset, outcome)
+    strategy_comparison, compare_map = _strategy_comparison(cfg, predictions, fixtures)
+    groups = _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map)
+    knockout_fixtures = _knockout_sections(
+        teams, fixtures, results, predictions, tipset, outcome, compare_map
+    )
 
     title_odds_chart = None
     bracket_html = None
@@ -188,6 +235,7 @@ def _build_report_context(
     }
     return {
         "header": header,
+        "strategy_comparison": strategy_comparison,
         "groups": groups,
         "knockout_fixtures": knockout_fixtures,
         "title_odds_chart": title_odds_chart,
@@ -197,12 +245,12 @@ def _build_report_context(
     }
 
 
-def _fixture_block(m, teams, results, predictions, tipset, weight) -> dict:
+def _fixture_block(m, teams, results, predictions, tipset, weight, compare_map=None) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "ldw_chart": None, "heatmap": None}
+             "tip": None, "naive": None, "compare": None, "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
@@ -210,6 +258,8 @@ def _fixture_block(m, teams, results, predictions, tipset, weight) -> dict:
     pred = predictions.get(m.match_id)
     if pred is None:
         return block
+    if compare_map is not None:
+        block["compare"] = compare_map.get(m.match_id)
     dist = pred.scoreline
     tip = tipset.tips.get(m.match_id)
     rec_h = rec_a = None
@@ -224,7 +274,7 @@ def _fixture_block(m, teams, results, predictions, tipset, weight) -> dict:
     return block
 
 
-def _group_sections(teams, fixtures, results, predictions, tipset, outcome) -> list[dict]:
+def _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
     by_group: dict[str, list[Match]] = {}
     for m in fixtures:
         if m.group:
@@ -232,7 +282,7 @@ def _group_sections(teams, fixtures, results, predictions, tipset, outcome) -> l
     sections = []
     for letter in sorted(by_group):
         ms = sorted(by_group[letter], key=lambda m: m.kickoff)
-        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1) for m in ms]
+        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1, compare_map) for m in ms]
         adv_chart = None
         if outcome is not None:
             adv_chart = _advancement_chart(letter, ms, teams, outcome)
@@ -258,13 +308,13 @@ def _advancement_chart(letter, group_matches, teams, outcome):
     return charts.advancement_stacked_bar(letter, rows)
 
 
-def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome) -> list[dict]:
+def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
     blocks = []
     for m in fixtures:
         if m.group is not None:  # group matches handled elsewhere
             continue
         if m.participants_known or m.match_id in results:
-            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2))
+            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2, compare_map))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,

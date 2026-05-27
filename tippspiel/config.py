@@ -28,6 +28,7 @@ class PredictorConfig:
 @dataclass(frozen=True)
 class StrategyConfig:
     name: str
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -100,7 +101,10 @@ def load_config(path: str | Path) -> Config:
                 name=raw["predictor"]["name"],
                 params=dict(raw["predictor"].get("params", {})),
             ),
-            strategy=StrategyConfig(name=raw["strategy"]["name"]),
+            strategy=StrategyConfig(
+                name=raw["strategy"]["name"],
+                params=dict(raw["strategy"].get("params", {})),
+            ),
             simulation=SimulationConfig(
                 iterations=int(sim["iterations"]),
                 seed=int(sim["seed"]),

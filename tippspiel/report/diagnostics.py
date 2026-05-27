@@ -213,6 +213,29 @@ def _simulation_section(outcome, teams, fixtures) -> dict | None:
     }
 
 
+# --------------------------------------------------------------------------- rank-opt
+def _rank_comparison(cfg, predictions, fixtures) -> dict | None:
+    """Compare the EV-optimal slate with the field-anticipating rank-optimised slate.
+
+    Shows how much (and where) optimising for P(rank=1) against the modelled field would
+    deviate from EV-maximisation — the payoff artifact of the rank-optimising strategy.
+    Always computed (regardless of the active strategy) at a modest world count."""
+    from ..strategy.rank_optimizing import comparison_from_params
+
+    p = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
+    comp = comparison_from_params(predictions, fixtures, p, seed=cfg.simulation.seed)
+    if comp is None:
+        return None
+    return {
+        "pool_size": comp.pool_size, "top_n": comp.top_n, "n_worlds": comp.n_worlds,
+        "n_tippable": len(comp.ev_slate),
+        "ev_p_win": comp.ev_p_win, "rank_p_win": comp.rank_p_win,
+        "ev_total_ev": comp.ev_total_ev, "rank_total_ev": comp.rank_total_ev,
+        "n_diff": comp.n_diff,
+        "diffs": comp.diffs,
+    }
+
+
 # --------------------------------------------------------------------------- bonus
 def _bonus_history(qid, dist, mean, mode) -> tuple[str, str]:
     if qid == "top_scorer_goals" and mean is not None:
@@ -310,7 +333,40 @@ def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- markdown
-def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
+def _render_rank_section(L: list[str], rank: dict | None) -> None:
+    L.append("## 7. Rank-optimisation (field-anticipating) comparison")
+    if rank is None:
+        L.append("_No tippable fixtures._")
+        L.append("")
+        return
+    L.append(
+        f"Optimising P(rank<= {rank['top_n']}) for a {rank['pool_size']:,}-participant pool "
+        f"({rank['n_worlds']:,} sampled worlds). Compares the EV-optimal slate with the "
+        f"rank-optimised slate; contrarian deviations trade EV for win probability."
+    )
+    L.append(_fixed_table(
+        ["metric", "EV slate", "rank slate"],
+        [["estimated P(win)", f"{rank['ev_p_win']:.4g}", f"{rank['rank_p_win']:.4g}"],
+         ["total E[points]", f"{rank['ev_total_ev']:.1f}", f"{rank['rank_total_ev']:.1f}"],
+         ["contrarian deviations", "-", f"{rank['n_diff']} of {rank['n_tippable']}"]],
+    ))
+    if rank["diffs"]:
+        L.append("")
+        L.append("### Contrarian deviations (EV tip -> rank tip)")
+        rows = []
+        for d in rank["diffs"]:
+            ldw = "/".join(f"{x:.0%}".rstrip("%") for x in d["ldw"])
+            rows.append([
+                d["match_id"],
+                f"{d['ev_tip'][0]}:{d['ev_tip'][1]}",
+                f"{d['rank_tip'][0]}:{d['rank_tip'][1]}",
+                ldw, f"{d['entropy']:.2f}",
+            ])
+        L.append(_fixed_table(["match", "EV tip", "rank tip", "LDW", "entropy(bits)"], rows))
+    L.append("")
+
+
+def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies, rank=None) -> str:
     L = []
     L.append("# Claude Diagnostic Report")
     L.append("")
@@ -444,6 +500,9 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
     L.append(f"**{len(anomalies)} checks: {n_fail} FAIL, {n_warn} WARN, "
              f"{len(anomalies) - n_fail - n_warn} PASS/INFO.**")
     L.append("")
+
+    # 7. Rank-optimisation comparison
+    _render_rank_section(L, rank)
     return "\n".join(L)
 
 
@@ -455,6 +514,7 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
     notes = _behaviour_notes(pb)
     sim = _simulation_section(outcome, teams, fixtures)
     bonus = _bonus_section(bundle, teams, outcome)
+    rank = _rank_comparison(cfg, predictions, fixtures)
     anomalies = _anomaly_checks(predictions, records, pb, sim, bonus)
     meta = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -478,9 +538,10 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
         "fixtures": records,
         "simulation": sim,
         "bonus": bonus,
+        "rank_comparison": rank,
         "anomalies": anomalies,
     }
-    markdown = _render_markdown(meta, pb, notes, records, sim, bonus, anomalies)
+    markdown = _render_markdown(meta, pb, notes, records, sim, bonus, anomalies, rank)
     return markdown, data
 
 

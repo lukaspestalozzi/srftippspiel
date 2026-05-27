@@ -92,7 +92,8 @@ picks the lowest-total scoreline capturing the dominant tendency.
   (`stages.py`), `ScorelineDistribution` (`scoreline.py`).
 - `tippspiel/predictors/` — `EloPoissonPredictor` (Phase-1/2); `market_odds.py` is a Phase-3 stub.
 - `tippspiel/strategy/` — `expected_points.py` (EV optimiser; `ev_components()` is the
-  reusable EV breakdown), `bonus.py` (bonus questions). `rank_optimizing.py` is a stub.
+  reusable EV breakdown), `bonus.py` (bonus questions), `rank_optimizing.py`
+  (`RankOptimizingStrategy` + `PredictorDerivedFieldModel` — see "Rank-optimising strategy").
 - `tippspiel/simulation/` — vectorised NumPy `TournamentSimulator` + standings/thirds/bracket.
 - `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report) and
   `diagnostics.py` (my report).
@@ -130,8 +131,29 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - Tests live in `tests/`; mirror the `REPO = Path(tippspiel.__file__).parent.parent` fixture
   pattern and keep simulation iterations small (a few thousand) for speed.
 
+## Rank-optimising strategy
+
+`RankOptimizingStrategy` (`strategy/rank_optimizing.py`) tips to **win the pool**, not to
+maximise own EV. Select it with `strategy: { name: rank_optimizing, params: {...} }`
+(default stays `expected_points`). It models the field via `PredictorDerivedFieldModel`
+(`expert_fraction`, `temperature`), samples `n_worlds` joint result vectors (each tippable
+match drawn independently from its predicted scoreline — pre-tournament that's the group
+matches, which are independent), and maximises `P(rank<=top_n)` for a `pool_size`-participant
+pool. Objective: **conditioned on a sampled result vector the field is i.i.d.**, so opponent
+totals ≈ `Normal(mean_r, var_r)` (per-match moments via `field_score_moments`); the number of
+opponents beating me ≈ `Poisson(pool_size·SF((s_me-mean_r)/sd_r))`, and `P(rank<=top_n)` is the
+mean Poisson-CDF over worlds. A coordinate-ascent optimiser starts from the EV slate and only
+deviates where contrarian variance strictly raises the win probability. The simulator is
+**unchanged** (the group slate needs no joint per-iteration scorelines); bonus/champion answers
+are carried over as the EV-optimal (modal) picks (contrarian bonus optimisation is out of
+scope). Diagnostic §7 ("Rank-optimisation comparison") shows EV-vs-rank `P(win)`, total
+`E[points]`, and the contrarian deviations — it runs regardless of the active strategy. Reuses
+`score_tip`/`best_tip`/`ev_components` from `expected_points.py`. No external pool-tip data
+exists, so the field model is a documented predictor-derived assumption.
+
 ## Phase status
 
 Phase 1 (group tips + report) and Phase 2 (Monte Carlo engine + bonus questions) are
-implemented. Phase 3 (`MarketOddsPredictor`, `RankOptimizingStrategy`, `FieldModel`) is
-interface stubs only — implement the seams, don't refactor around them.
+implemented. Phase 3: `RankOptimizingStrategy` + `FieldModel` are now implemented (see
+"Rank-optimising strategy"); `MarketOddsPredictor` remains an interface stub — implement the
+seam, don't refactor around it.
