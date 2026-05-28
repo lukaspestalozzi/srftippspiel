@@ -37,8 +37,8 @@ shows all models side by side with both meta-strategies per match. The **single-
 `diagnose` and `verify` still **require** `--predictor` (no default; they error without it).
 Choices: `elo_poisson` (reads the official eloratings snapshot `teams.csv`) or
 `attack_defence_poisson` (reads the computed `teams_attack_defence.csv`). Each config's
-`predictors:` block carries params for **both** models; `tune` always sweeps `elo_poisson`,
-`build-elo`/`validate-data` need no predictor.
+`predictors:` block carries params for **both** models; `tune` is single-model (`--predictor`
+required) and sweeps the chosen model's grid, `build-elo`/`validate-data` need no predictor.
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
 = FIFA World Cup 2026; further tournaments live under `configs/<name>.yaml`). A config file
