@@ -49,13 +49,15 @@ def test_ratings_file_missing_raises():
         ratings_file(AttackDefencePoissonPredictor(), bad)
 
 
-def test_cli_requires_predictor_for_prediction_commands(capsys):
-    rc = main(["predict", "--config", str(WC2026)])
+def test_cli_requires_predictor_for_single_model_commands(capsys):
+    # verify/diagnose still need a single --predictor; run/predict do not (they always
+    # run every configured predictor side by side).
+    rc = main(["verify", "--config", str(WC2026)])
     assert rc == 2
     assert "--predictor is required" in capsys.readouterr().err
 
 
 def test_cli_rejects_unknown_predictor(capsys):
-    rc = main(["run", "--config", str(WC2026), "--predictor", "bogus"])
+    rc = main(["verify", "--config", str(WC2026), "--predictor", "bogus"])
     assert rc == 2
     assert "Unknown predictor" in capsys.readouterr().err

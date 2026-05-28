@@ -1,9 +1,11 @@
 """tippspiel CLI (spec §8).
 
-    tippspiel run            full pipeline: predict, simulate, report
-    tippspiel predict        group-stage predictions + tips only (no simulation)
-    tippspiel diagnose       write the Claude diagnostic report (markdown + JSON)
-    tippspiel verify         backtest the predictor against a completed tournament (pool points)
+    tippspiel run            combined pipeline across every configured predictor: predict,
+                              simulate, and emit one multi-model report.html (4 tips/match:
+                              2 ELO models × {EV, rank-optimising})
+    tippspiel predict        same combined multi-model report, no simulation
+    tippspiel diagnose       write the Claude diagnostic report (markdown + JSON, single model)
+    tippspiel verify         backtest one predictor against a completed tournament (single model)
     tippspiel validate-data  check input files for schema/consistency errors
 
 Each tournament is one config file; select it with ``--config <file>`` (default
@@ -20,13 +22,14 @@ from .config import load_config, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import (
     build_elo,
-    run_pipeline,
+    run_combined_pipeline,
     run_tuning,
     write_diagnostics,
     write_report,
     write_verification,
 )
 from .simulation.bracket import Bracket
+from .strategy.bonus import build_bonus_questions
 
 DEFAULT_CONFIG = "config.yaml"
 DEFAULT_BENCHMARKS = [
@@ -36,34 +39,53 @@ DEFAULT_BENCHMARKS = [
     "configs/wc2018.yaml",
     "configs/euro2020.yaml",
 ]
-# Commands that build a Predictor and therefore require an explicit --predictor (no default).
-_PREDICTION_COMMANDS = {"run", "predict", "verify", "diagnose"}
+# Commands that build a single Predictor and therefore require an explicit --predictor.
+# ``run`` and ``predict`` no longer take one: they run every configured predictor.
+_PREDICTION_COMMANDS = {"verify", "diagnose"}
+
+
+def _print_bonus_picks(run, bundle) -> None:
+    outcome = run["core"]["outcome"]
+    teams = run["core"]["teams"]
+    if outcome is None:
+        return
+    for q in build_bonus_questions(bundle.bonus_questions):
+        dist = q.resolve(outcome)
+        if not dist:
+            continue
+        pick, p = max(dist.items(), key=lambda kv: kv[1])
+        name = teams[pick].name if pick in teams else pick
+        print(f"    {q.question_id}: {name} ({p:.1%})")
 
 
 def _cmd_predict(cfg, bundle) -> int:
-    result = run_pipeline(cfg, bundle, simulate=False)
+    result = run_combined_pipeline(cfg, bundle, simulate=False)
     path = write_report(cfg, result["context"])
-    tips = result["tipset"].tips
-    print(f"[{bundle.display_name}] predicted {len(tips)} tippable fixture(s) "
-          f"(group stage, no simulation).")
+    runs = result["runs"]
+    print(f"[{bundle.display_name}] {len(runs)} model(s), no simulation:")
+    for run in runs:
+        n_tips = len(run["core"]["predictions"])
+        print(f"  {run['label']} ({run['name']}, {run['ratings_file']}): "
+              f"{n_tips} tippable fixture(s)")
     print(f"Report written to {path}")
     return 0
 
 
 def _cmd_run(cfg, bundle) -> int:
-    result = run_pipeline(cfg, bundle, simulate=True)
+    result = run_combined_pipeline(cfg, bundle, simulate=True)
     path = write_report(cfg, result["context"])
-    tips = result["tipset"].tips
-    outcome = result["outcome"]
-    print(f"[{bundle.display_name}] predicted {len(tips)} tippable fixture(s).")
-    if outcome is not None:
-        print(f"Monte Carlo: {outcome.mc_iterations:,} iterations (seed {outcome.mc_seed}), "
-              f"max SE {outcome.mc_standard_error:.4f}.")
-        answers = result["tipset"].bonus_answers
-        if answers:
-            print("Recommended bonus answers:")
-            for qid, ans in answers.items():
-                print(f"  {qid}: {ans}")
+    runs = result["runs"]
+    print(f"[{bundle.display_name}] {len(runs)} model(s):")
+    for run in runs:
+        core = run["core"]
+        outcome = core["outcome"]
+        n_tips = len(core["predictions"])
+        print(f"  {run['label']} ({run['name']}, {run['ratings_file']}): "
+              f"{n_tips} tippable fixture(s)")
+        if outcome is not None:
+            print(f"    MC {outcome.mc_iterations:,} iters (seed {outcome.mc_seed}), "
+                  f"max SE {outcome.mc_standard_error:.4f}")
+            _print_bonus_picks(run, bundle)
     print(f"Report written to {path}")
     return 0
 
@@ -253,9 +275,9 @@ def _add_common_args(parser: argparse.ArgumentParser, *, with_default: bool) -> 
     parser.add_argument(
         "--predictor", metavar="NAME",
         default=(None if with_default else argparse.SUPPRESS),
-        help="prediction model to use (required for run/predict/verify/diagnose; no default): "
-             "elo_poisson (official eloratings) or attack_defence_poisson (computed ratings); "
-             "params come from the config 'predictors:' block",
+        help="prediction model: required for verify/diagnose (single-model); ignored by "
+             "run/predict (these always run every configured predictor side by side). "
+             "Choices: elo_poisson | attack_defence_poisson; params from config 'predictors:'.",
     )
 
 

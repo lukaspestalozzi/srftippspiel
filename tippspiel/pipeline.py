@@ -1,12 +1,18 @@
-"""Pipeline orchestration: data -> predictor -> (simulator) -> strategy -> report."""
+"""Pipeline orchestration: data -> predictor -> (simulator) -> strategy -> report.
+
+The combined report (``run``/``predict``) runs every configured predictor and presents both
+meta-strategies (EV-optimal and pool-rank-optimising) for each — four tips per match — plus
+each model's own Monte-Carlo outcomes. Single-model paths (``diagnose``/``verify``/``tune``)
+still go through ``_run_core`` / ``build_predictor``."""
 
 from __future__ import annotations
 
 import hashlib
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .config import Config, TournamentBundle
+from .config import Config, TournamentBundle, select_predictor
 from .data.file_provider import FileDataProvider
 from .model.types import Match, MatchPrediction, Result, Team, TournamentOutcome
 from .predictors.base import Predictor
@@ -15,7 +21,23 @@ from .report import charts
 from .report.html_writer import ReportWriter
 from .strategy.base import TipStrategy
 from .strategy.bonus import build_bonus_questions
-from .strategy.expected_points import ExpectedPointsStrategy, expected_points
+from .strategy.expected_points import (
+    ExpectedPointsStrategy,
+    ev_components,
+    expected_points,
+)
+from .strategy.rank_optimizing import comparison_from_params
+
+# Human-readable display names for the configured predictors. Anything missing falls back
+# to the raw name (so future predictors render acceptably without code changes).
+_MODEL_LABELS = {
+    "elo_poisson": "FIFA Elo",
+    "attack_defence_poisson": "Attack / Defence",
+}
+
+
+def _model_label(name: str) -> str:
+    return _MODEL_LABELS.get(name, name)
 
 CAVEATS = (
     "The Elo-Poisson model is a reasonable forecaster but will not systematically "
@@ -137,18 +159,80 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     }
 
 
-def run_pipeline(
-    cfg: Config,
-    bundle: TournamentBundle,
-    *,
-    simulate: bool,
-) -> dict:
-    core = _run_core(cfg, bundle, simulate=simulate)
-    context = _build_report_context(
-        cfg, bundle, core["teams"], core["fixtures"], core["results"],
-        core["predictions"], core["tipset"], core["outcome"], core["predictor"],
+def _model_run(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
+    """Predict + optionally simulate for a single (already-selected) predictor. No strategy
+    pass — the combined report computes both EV and rank slates externally via
+    ``comparison_from_params``, so we skip ``strategy.generate_tips`` here.
+    """
+    predictor = build_predictor(cfg)
+    provider = FileDataProvider(
+        ratings_file(predictor, bundle),
+        bundle.fixtures_file,
+        bundle.results_file,
+        bundle.thirds_allocation_file,
     )
-    return {"context": context, "tipset": core["tipset"], "outcome": core["outcome"]}
+    teams = {t.team_id: t for t in provider.get_teams()}
+    fixtures = provider.get_fixtures()
+    results = {r.match_id: r for r in provider.get_results()}
+    played = set(results)
+
+    outcome: TournamentOutcome | None = None
+    if simulate:
+        from .simulation.simulator import TournamentSimulator
+
+        sim = TournamentSimulator(
+            fixtures=fixtures, teams=teams, results=results, predictor=predictor,
+            thirds_allocation=provider.get_thirds_allocation(),
+            iterations=cfg.simulation.iterations, seed=cfg.simulation.seed,
+            penalty_model=cfg.simulation.penalty_model,
+        )
+        outcome = sim.run()
+
+    predictions = _predict_tippable(fixtures, teams, played, predictor)
+    return {
+        "teams": teams, "fixtures": fixtures, "results": results,
+        "predictions": predictions, "outcome": outcome, "predictor": predictor,
+    }
+
+
+def run_combined_pipeline(
+    cfg: Config, bundle: TournamentBundle, *, simulate: bool,
+) -> dict:
+    """Run every configured predictor (skipping any whose ratings file is missing), compute
+    both meta-strategy slates per model, and assemble the combined multi-model report context.
+
+    Returns ``{"context": ..., "runs": [{"name", "label", "params", "ratings_file", "core",
+    "comparison"}, ...]}``.
+    """
+    runs: list[dict] = []
+    for name in cfg.predictors:
+        try:
+            mcfg = select_predictor(cfg, name)
+            predictor_probe = build_predictor(mcfg)
+            ratings_path = ratings_file(predictor_probe, bundle)
+        except ValueError as exc:
+            print(f"skipping predictor {name!r}: {exc}", file=sys.stderr)
+            continue
+        core = _model_run(mcfg, bundle, simulate=simulate)
+        comp = comparison_from_params(
+            core["predictions"], core["fixtures"],
+            cfg.strategy.params, seed=cfg.simulation.seed,
+        )
+        runs.append({
+            "name": name,
+            "label": _model_label(name),
+            "params": mcfg.predictor.params,
+            "ratings_file": ratings_path.name,
+            "core": core,
+            "comparison": comp,
+        })
+    if not runs:
+        raise ValueError(
+            "no predictors with available ratings files in config; "
+            f"defined predictors: {', '.join(sorted(cfg.predictors)) or '(none)'}"
+        )
+    context = _build_combined_context(cfg, bundle, runs, simulate=simulate)
+    return {"context": context, "runs": runs}
 
 
 def write_diagnostics(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
@@ -198,31 +282,30 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
-def _strategy_comparison(cfg, predictions, fixtures):
-    """EV-optimal vs rank-optimised slate for the report: a per-match ``compare_map`` (marking
-    where the two strategies deviate) and an aggregate summary. ``(None, {})`` when nothing is
-    tippable. Runs regardless of the active strategy so the report always shows both."""
-    from .strategy.rank_optimizing import comparison_from_params
-
-    params = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
-    comp = comparison_from_params(predictions, fixtures, params, seed=cfg.simulation.seed)
-    if comp is None:
-        return None, {}
-    compare_map = {}
-    for mid, ev in comp.ev_slate.items():
-        rk = comp.rank_slate[mid]
-        compare_map[mid] = {
-            "ev_home": ev[0], "ev_away": ev[1],
-            "rank_home": rk[0], "rank_away": rk[1],
-            "differs": ev != rk,
-        }
-    summary = {
-        "ev_p_win": comp.ev_p_win, "rank_p_win": comp.rank_p_win,
-        "ev_total_ev": comp.ev_total_ev, "rank_total_ev": comp.rank_total_ev,
-        "n_diff": comp.n_diff, "n_tippable": len(comp.ev_slate),
-        "pool_size": comp.pool_size, "top_n": comp.top_n,
-    }
-    return summary, compare_map
+def _strategy_summary(runs: list[dict]) -> dict | None:
+    """Per-model EV-vs-rank summary for the report header section. Returns ``None`` if no run
+    has a comparison (i.e. nothing tippable)."""
+    rows = []
+    pool_size = top_n = None
+    for run in runs:
+        comp = run["comparison"]
+        if comp is None:
+            continue
+        rows.append({
+            "model_name": run["name"],
+            "model_label": run["label"],
+            "ev_p_win": comp.ev_p_win,
+            "rank_p_win": comp.rank_p_win,
+            "ev_total_ev": comp.ev_total_ev,
+            "rank_total_ev": comp.rank_total_ev,
+            "n_diff": comp.n_diff,
+            "n_tippable": len(comp.ev_slate),
+        })
+        pool_size = comp.pool_size
+        top_n = comp.top_n
+    if not rows:
+        return None
+    return {"rows": rows, "pool_size": pool_size, "top_n": top_n}
 
 
 def _resolve_as_of(as_of: str | None, bundle: TournamentBundle) -> date:
@@ -342,84 +425,144 @@ def build_elo(
     return result
 
 
-def _build_report_context(
-    cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor
+def _build_combined_context(
+    cfg: Config, bundle: TournamentBundle, runs: list[dict], *, simulate: bool,
 ) -> dict:
-    strategy_comparison, compare_map = _strategy_comparison(cfg, predictions, fixtures)
-    groups = _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map)
-    knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, compare_map
-    )
+    """Assemble the report context for the combined multi-model view.
 
-    title_odds_chart = None
-    bracket_html = None
-    bonus = []
-    if outcome is not None:
-        title_rows = sorted(
-            ((teams[t].name, m.get("wins_title", 0.0)) for t, m in outcome.advancement.items()),
-            key=lambda r: r[1],
-            reverse=True,
-        )[:20]
-        title_odds_chart = charts.title_odds_bar(title_rows)
-        bracket_html = _bracket_chart(teams, outcome)
-        bonus = _bonus_sections(bundle, teams, tipset, outcome)
+    Every fixture carries a per-model EV+rank tip (2 models × 2 strategies = 4 tips per match).
+    Each simulated run also gets its own outcomes section (title odds, group advancement,
+    bracket, bonus picks)."""
+    # fixtures/results are identical across runs (only ratings differ), so take the first.
+    primary = runs[0]["core"]
+    teams = primary["teams"]
+    fixtures = primary["fixtures"]
+    results = primary["results"]
+
+    groups = _group_sections(fixtures, results, runs)
+    knockout_fixtures = _knockout_sections(fixtures, results, runs)
+    strategy_summary = _strategy_summary(runs)
+
+    model_outcomes = []
+    if simulate:
+        for run in runs:
+            outcome = run["core"]["outcome"]
+            if outcome is None:
+                continue
+            mteams = run["core"]["teams"]
+            title_rows = sorted(
+                ((mteams[t].name, m.get("wins_title", 0.0))
+                 for t, m in outcome.advancement.items()),
+                key=lambda r: r[1], reverse=True,
+            )[:20]
+            adv_charts = []
+            by_group: dict[str, list[Match]] = {}
+            for m in fixtures:
+                if m.group:
+                    by_group.setdefault(m.group, []).append(m)
+            for letter in sorted(by_group):
+                adv_charts.append({
+                    "letter": letter,
+                    "chart": _advancement_chart(letter, by_group[letter], mteams, outcome),
+                })
+            model_outcomes.append({
+                "name": run["name"],
+                "label": run["label"],
+                "ratings_file": run["ratings_file"],
+                "mc_iterations": outcome.mc_iterations,
+                "mc_seed": outcome.mc_seed,
+                "mc_standard_error": outcome.mc_standard_error,
+                "title_odds_chart": charts.title_odds_bar(title_rows),
+                "advancement_charts": adv_charts,
+                "bracket_html": _bracket_chart(mteams, outcome),
+                "bonus": _bonus_sections(bundle, mteams, outcome),
+            })
 
     header = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "tournament": bundle.display_name,
         "config": cfg.config_path.name if cfg.config_path else None,
-        "predictor_name": predictor.name,
-        "predictor_params": getattr(predictor, "params", {}),
-        "ratings_file": ratings_file(predictor, bundle).name,
-        "strategy_name": cfg.strategy.name,
-        "strategy_params": getattr(cfg.strategy, "params", {}),
+        "models": [
+            {"name": r["name"], "label": r["label"],
+             "params": r["params"], "ratings_file": r["ratings_file"]}
+            for r in runs
+        ],
+        "strategies": ["expected_points", "rank_optimizing"],
         "elo_source": bundle.elo_source or None,
-        "mc_iterations": outcome.mc_iterations if outcome else None,
-        "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),
+        "simulate": simulate,
     }
     return {
         "header": header,
-        "strategy_comparison": strategy_comparison,
+        "strategy_summary": strategy_summary,
         "groups": groups,
         "knockout_fixtures": knockout_fixtures,
-        "title_odds_chart": title_odds_chart,
-        "bracket_html": bracket_html,
-        "bonus": bonus,
+        "model_outcomes": model_outcomes,
         "caveats": CAVEATS,
     }
 
 
-def _fixture_block(m, teams, results, predictions, tipset, weight, compare_map=None) -> dict:
-    name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
-    name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
-    block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
-             "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "compare": None, "ldw_chart": None, "heatmap": None}
+def _fixture_block(m: Match, results: dict, runs: list[dict], weight: int) -> dict:
+    """One match's block for the combined report: per-model EV/Rank tips + charts.
+
+    The block has a single ``tip_rows`` list (one entry per model) so the template can render
+    a 2×2 tip matrix (rows = models, cols = EV / Rank) and, on expand, per-model charts."""
+    # Names: use the first run's teams (names identical across models).
+    teams0 = runs[0]["core"]["teams"]
+    name_h = teams0[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
+    name_a = teams0[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
+    block: dict = {
+        "match_id": m.match_id, "home": name_h, "away": name_a,
+        "kickoff": m.kickoff, "stage": m.stage.value,
+        "played": m.match_id in results, "result": None,
+        "tip_rows": [], "tippable": False,
+        "agree_ev": True, "agree_rank": True, "any_contrarian": False,
+    }
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
         return block
-    pred = predictions.get(m.match_id)
-    if pred is None:
+    if not m.participants_known:
         return block
-    if compare_map is not None:
-        block["compare"] = compare_map.get(m.match_id)
-    dist = pred.scoreline
-    tip = tipset.tips.get(m.match_id)
-    rec_h = rec_a = None
-    if tip is not None:
-        rec_h, rec_a = tip.tip_home, tip.tip_away
-        block["tip"] = {"home": tip.tip_home, "away": tip.tip_away, "ev": tip.expected_points}
-        nh, na, _ = dist.most_likely_scorelines(1)[0]
-        block["naive"] = {"home": nh, "away": na,
-                          "ev": expected_points(dist, nh, na, weight)}
-    block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
-    block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
+
+    ev_tips: list[tuple[int, int]] = []
+    rank_tips: list[tuple[int, int]] = []
+    for run in runs:
+        pred = run["core"]["predictions"].get(m.match_id)
+        comp = run["comparison"]
+        if pred is None or comp is None:
+            continue
+        dist = pred.scoreline
+        ev_h, ev_a = comp.ev_slate.get(m.match_id, (0, 0))
+        rk_h, rk_a = comp.rank_slate.get(m.match_id, (ev_h, ev_a))
+        ev_points = ev_components(dist, ev_h, ev_a, weight)["total"]
+        rk_points = ev_components(dist, rk_h, rk_a, weight)["total"]
+        contrarian = (ev_h, ev_a) != (rk_h, rk_a)
+        block["tip_rows"].append({
+            "model_name": run["name"],
+            "model_label": run["label"],
+            "ev": {"home": ev_h, "away": ev_a, "ev": ev_points},
+            "rank": {"home": rk_h, "away": rk_a, "ev": rk_points},
+            "contrarian": contrarian,
+            "ldw_chart": charts.ldw_bar(dist, name_h, name_a),
+            "heatmap": charts.scoreline_heatmap(
+                dist, ev_h, ev_a,
+                alt_home=rk_h if contrarian else None,
+                alt_away=rk_a if contrarian else None,
+            ),
+        })
+        ev_tips.append((ev_h, ev_a))
+        rank_tips.append((rk_h, rk_a))
+        if contrarian:
+            block["any_contrarian"] = True
+
+    block["tippable"] = bool(block["tip_rows"])
+    block["agree_ev"] = len(set(ev_tips)) <= 1
+    block["agree_rank"] = len(set(rank_tips)) <= 1
     return block
 
 
-def _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
+def _group_sections(fixtures: list[Match], results: dict, runs: list[dict]) -> list[dict]:
     by_group: dict[str, list[Match]] = {}
     for m in fixtures:
         if m.group:
@@ -427,12 +570,28 @@ def _group_sections(teams, fixtures, results, predictions, tipset, outcome, comp
     sections = []
     for letter in sorted(by_group):
         ms = sorted(by_group[letter], key=lambda m: m.kickoff)
-        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1, compare_map) for m in ms]
-        adv_chart = None
-        if outcome is not None:
-            adv_chart = _advancement_chart(letter, ms, teams, outcome)
-        sections.append({"letter": letter, "fixtures": blocks, "advancement_chart": adv_chart})
+        blocks = [_fixture_block(m, results, runs, weight=1) for m in ms]
+        sections.append({"letter": letter, "fixtures": blocks})
     return sections
+
+
+def _knockout_sections(fixtures: list[Match], results: dict, runs: list[dict]) -> list[dict]:
+    blocks = []
+    for m in fixtures:
+        if m.group is not None:
+            continue
+        if m.participants_known or m.match_id in results:
+            blocks.append(_fixture_block(m, results, runs, weight=2))
+        else:
+            note = (f"Participants not yet determined: "
+                    f"{m.home.placeholder} vs {m.away.placeholder}.")
+            blocks.append({
+                "match_id": m.match_id, "stage": m.stage.value,
+                "home": m.home.placeholder, "away": m.away.placeholder,
+                "played": False, "tippable": False, "slot_note": note,
+                "tip_rows": [],
+            })
+    return blocks
 
 
 def _advancement_chart(letter, group_matches, teams, outcome):
@@ -453,22 +612,6 @@ def _advancement_chart(letter, group_matches, teams, outcome):
     return charts.advancement_stacked_bar(letter, rows)
 
 
-def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
-    blocks = []
-    for m in fixtures:
-        if m.group is not None:  # group matches handled elsewhere
-            continue
-        if m.participants_known or m.match_id in results:
-            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2, compare_map))
-        else:
-            note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
-            blocks.append({"match_id": m.match_id, "stage": m.stage.value,
-                           "home": m.home.placeholder, "away": m.away.placeholder,
-                           "played": False, "tip": None, "slot_note": note,
-                           "occupants_chart": None})
-    return blocks
-
-
 def _bracket_chart(teams, outcome):
     # Reach-metric keys appear in the advancement dict in stage order (group placements first,
     # then reach_<stage> per knockout round). Derive them so any format renders correctly.
@@ -482,7 +625,7 @@ def _bracket_chart(teams, outcome):
     return charts.bracket_progression(rows, labels)
 
 
-def _bonus_sections(bundle, teams, tipset, outcome) -> list[dict]:
+def _bonus_sections(bundle, teams, outcome) -> list[dict]:
     def name_of(key):
         return teams[key].name if key in teams else key
 

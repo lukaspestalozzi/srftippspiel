@@ -174,40 +174,44 @@ def test_comparison_from_params_groups_and_empty():
     assert comparison_from_params({}, fixtures, {}, seed=1) is None
 
 
-def test_report_context_carries_strategy_comparison(tmp_path):
+def test_report_context_carries_per_model_strategy_summary(tmp_path):
     import dataclasses
 
-    from tippspiel.pipeline import run_pipeline
+    from tippspiel.pipeline import run_combined_pipeline
     from tippspiel.report.html_writer import ReportWriter
 
-    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
+    cfg = load_config(REPO / "config.yaml")
     bundle = load_tournament(REPO / "config.yaml")
-    # Active rank-optimising with a small world count keeps this fast.
+    # Smaller world count keeps the rank optimiser snappy.
     cfg = dataclasses.replace(
-        cfg,
-        strategy=dataclasses.replace(
-            cfg.strategy, name="rank_optimizing", params={"n_worlds": 600}
-        ),
+        cfg, strategy=dataclasses.replace(cfg.strategy, params={"n_worlds": 600})
     )
-    context = run_pipeline(cfg, bundle, simulate=False)["context"]
+    context = run_combined_pipeline(cfg, bundle, simulate=False)["context"]
 
-    sc = context["strategy_comparison"]
-    assert sc is not None
-    assert sc["n_tippable"] == 72
-    assert 0 <= sc["n_diff"] <= sc["n_tippable"]
-    # Every tippable group fixture carries a compare dict with a boolean deviation flag.
+    summary = context["strategy_summary"]
+    assert summary is not None
+    # One row per model, each with the expected per-model fields.
+    assert {r["model_name"] for r in summary["rows"]} == {
+        "elo_poisson", "attack_defence_poisson",
+    }
+    for row in summary["rows"]:
+        assert row["n_tippable"] == 72
+        assert 0 <= row["n_diff"] <= row["n_tippable"]
+
+    # Every tippable group fixture carries one tip row per model with a contrarian flag.
     blocks = [fx for g in context["groups"] for fx in g["fixtures"]]
-    tippable = [fx for fx in blocks if fx["tip"] is not None]
+    tippable = [fx for fx in blocks if fx["tippable"]]
     assert len(tippable) == 72
     for fx in tippable:
-        assert fx["compare"] is not None
-        assert isinstance(fx["compare"]["differs"], bool)
+        assert len(fx["tip_rows"]) == 2
+        for row in fx["tip_rows"]:
+            assert isinstance(row["contrarian"], bool)
 
     html = ReportWriter().render(context)
     assert 'id="strategy"' in html
-    assert "Strategy comparison" in html
-    if sc["n_diff"] > 0:
-        assert "badge-diff" in html and "contrarian" in html
+    assert "Strategy summary" in html
+    if any(r["n_diff"] > 0 for r in summary["rows"]):
+        assert "contrarian" in html
 
 
 def test_build_strategy_dispatches_rank_optimizing():
