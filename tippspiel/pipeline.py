@@ -265,7 +265,8 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
 
 
 def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None) -> dict:
-    """Sweep predictor params against completed-tournament backtests; write output/tune.{md,json}."""
+    """Sweep elo_poisson predictor params against completed-tournament backtests;
+    write output/tune.{md,json}."""
     from .config import load_tournament
     from .report.tuning import TuningWriter, build_tuning
 
@@ -278,6 +279,31 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
         results = {r.match_id: r for r in provider.get_results()}
         benchmarks.append((bundle, teams, fixtures, results))
     markdown, data = build_tuning(base_cfg, benchmarks, grid=grid, top=top)
+    paths = TuningWriter().write(markdown, data, base_cfg.report.output_dir)
+    return {"paths": paths, "data": data}
+
+
+def run_ad_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15) -> dict:
+    """Staged sweep of the attack/defence model (generation params × predictor params)
+    against completed-tournament backtests; write output/tune.{md,json}.
+
+    Each gen-params point triggers a fresh forward pass over ~25y of international results,
+    so this is heavier than ``run_tuning`` (~minutes vs ~seconds). Stage 2 reuses the
+    synthesised per-tournament teams cached by Stage 1.
+    """
+    from .config import load_tournament
+    from .report.ad_tuning import build_ad_tuning
+    from .report.tuning import TuningWriter
+
+    benchmarks = []
+    for cfg_path in benchmark_configs:
+        bundle = load_tournament(cfg_path)
+        provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+        fixtures = provider.get_fixtures()
+        results = {r.match_id: r for r in provider.get_results()}
+        as_of = _resolve_as_of(None, bundle)
+        benchmarks.append((bundle, fixtures, results, as_of))
+    markdown, data = build_ad_tuning(base_cfg, benchmarks, top=top)
     paths = TuningWriter().write(markdown, data, base_cfg.report.output_dir)
     return {"paths": paths, "data": data}
 

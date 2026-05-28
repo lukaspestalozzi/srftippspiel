@@ -35,7 +35,8 @@ tippspiel validate-data                              # check input files for sch
 tippspiel predict                                    # combined multi-model report, no simulation
 tippspiel run                                        # combined multi-model report + 50k Monte Carlo per model
 tippspiel verify --predictor elo_poisson             # backtest one predictor against a completed tournament
-tippspiel tune                                       # sweep elo_poisson params vs the completed-tournament backtests
+tippspiel tune --predictor elo_poisson               # sweep elo_poisson params (~seconds)
+tippspiel tune --predictor attack_defence_poisson    # staged A/D sweep + reality check (~few minutes)
 tippspiel run --config configs/euro2016.yaml         # the combined report for a different tournament
 ```
 
@@ -65,10 +66,19 @@ scoreline NLL). Five completed men's tournaments ship as seeded benchmarks — `
 `euro2024`, `wc2018` and `euro2020`; the model beats the naive baseline on all five. Output:
 `output/verify.{md,json}`.
 
-`tippspiel tune` sweeps the predictor parameters (`mu`, `k`, `rho`, `host_elo_bonus`,
-`ko_goal_scale`) over those benchmarks and writes a leaderboard (`output/tune.{md,json}`),
-ranking by calibration with pool points as the tie-break, plus a leave-one-tournament-out
-generalisation check. The shipped config parameters are the tuned result.
+`tippspiel tune --predictor <model>` sweeps that model's parameters against the same
+benchmarks and writes a leaderboard (`output/tune.{md,json}`), ranking by calibration with
+pool points as the tie-break, plus a leave-one-tournament-out generalisation check. The
+shipped config parameters are the tuned result. For `elo_poisson` it's a flat grid over
+`mu`, `k`, `rho`, `host_elo_bonus`, `ko_goal_scale`. For `attack_defence_poisson` it's a
+**staged** sweep: Stage 1 sweeps the rating-generation knobs in the `elo:` block
+(`learning_rate`, `lookback_years`, `recency_decay`, `ad_home_advantage`), regenerating the
+per-team `(attack, defence)` ratings via a forward pass each grid point; Stage 2 sweeps the
+predictor knobs (`base_log_rate`, `home_advantage`, `rho`, `ko_goal_scale`). The report
+includes a **reality check** comparing predicted vs actual mean goals/match, tendency
+split, scoreline frequencies, and tip composition for each completed tournament — so it's
+visible whether the tuner's RPS-optimal point trades realism for calibration (e.g.
+concentrating tips on 1:0).
 
 ## Configuration
 

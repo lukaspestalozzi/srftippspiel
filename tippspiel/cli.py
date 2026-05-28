@@ -41,7 +41,8 @@ DEFAULT_BENCHMARKS = [
 ]
 # Commands that build a single Predictor and therefore require an explicit --predictor.
 # ``run`` and ``predict`` no longer take one: they run every configured predictor.
-_PREDICTION_COMMANDS = {"verify", "diagnose"}
+# ``tune`` is single-model (each predictor has its own grid + scoring path).
+_PREDICTION_COMMANDS = {"verify", "diagnose", "tune"}
 
 
 def _print_bonus_picks(run, bundle) -> None:
@@ -125,7 +126,19 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     if missing:
         print(f"tune: benchmark config(s) not found: {missing}", file=sys.stderr)
         return 2
-    result = run_tuning(cfg, benchmark_configs, top=top)
+    name = cfg.predictor.name
+    if name == "elo_poisson":
+        result = run_tuning(cfg, benchmark_configs, top=top)
+        return _print_elo_tune(result)
+    if name == "attack_defence_poisson":
+        from .pipeline import run_ad_tuning
+        result = run_ad_tuning(cfg, benchmark_configs, top=top)
+        return _print_ad_tune(result)
+    print(f"tune: predictor {name!r} has no tuning grid implemented.", file=sys.stderr)
+    return 2
+
+
+def _print_elo_tune(result: dict) -> int:
     paths, data = result["paths"], result["data"]
     dm, rm = data["default_metrics"], data["recommended_metrics"]
     print(f"tuning written to {paths['markdown']} (+ {paths['json'].name}).")
@@ -137,6 +150,30 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     print("recommended params:")
     for key, val in data["recommended_params"].items():
         print(f"  {key}: {val}")
+    return 0
+
+
+def _print_ad_tune(result: dict) -> int:
+    paths, data = result["paths"], result["data"]
+    s1, s2 = data["stage1_generation"], data["stage2_predictor"]
+    cm = data["combined_metrics"]
+    print(f"A/D tuning written to {paths['markdown']} (+ {paths['json'].name}).")
+    print(f"benchmarks: {', '.join(data['benchmarks'])}.")
+    print(f"Stage 1 (generation, {s1['grid_size']} pts): "
+          f"default RPS {s1['default_metrics']['mean_rps']:.4f} -> "
+          f"best RPS {s1['recommended_metrics']['mean_rps']:.4f}; "
+          f"recommended: {s1['recommended_params']}")
+    print(f"Stage 2 (predictor,  {s2['grid_size']} pts): "
+          f"default RPS {s2['default_metrics']['mean_rps']:.4f} -> "
+          f"best RPS {s2['recommended_metrics']['mean_rps']:.4f}; "
+          f"recommended: {s2['recommended_params']}")
+    print(f"Combined: mean RPS {cm['mean_rps']:.4f}, model {cm['model']} pts "
+          f"({cm['model_pct']:.1f}% of max), {cm['exact_hits']} exact hits / "
+          f"{cm['matches']} matches.")
+    rv = data["reality_check"]["recommended"]["verdict"]
+    print(f"Reality check verdict: {rv['status']}")
+    for reason in rv["reasons"]:
+        print(f"  - {reason}")
     return 0
 
 
@@ -291,15 +328,14 @@ def _override_strategy(cfg, name: str | None):
 
 
 def _select_predictor(cfg, command: str, name: str | None):
-    """Resolve the active predictor. There is no default: prediction commands require
-    ``--predictor``; ``tune`` always sweeps ``elo_poisson``; other commands need no predictor.
+    """Resolve the active predictor. Prediction commands (verify/diagnose/tune) require
+    ``--predictor`` (no default). ``run``/``predict`` run every configured predictor and
+    don't need one. ``validate-data``/``build-elo`` don't build a predictor.
     Returns ``(cfg, error_message_or_None)``."""
     from .config import select_predictor
 
-    if command == "tune":
-        name = name or "elo_poisson"
-    elif command not in _PREDICTION_COMMANDS:
-        return cfg, None  # validate-data / build-elo don't build a predictor
+    if command not in _PREDICTION_COMMANDS:
+        return cfg, None
     if not name:
         available = ", ".join(sorted(cfg.predictors))
         return cfg, (f"{command}: --predictor is required (no default). "

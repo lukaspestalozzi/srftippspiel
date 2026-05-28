@@ -19,14 +19,15 @@ tournament's `results.csv` condition everything downstream. Originally built for
 
 ```bash
 pip install -e ".[dev]"     # setup (Python 3.11+)
-pytest -q                   # run the full suite (~5s); ALWAYS run before committing
+pytest -q                   # run the full suite (~30s); ALWAYS run before committing
 tippspiel validate-data     # schema/consistency check on input files
 tippspiel predict                                    # combined report (every predictor × EV/rank), no simulation
 tippspiel run                                        # combined report + Monte Carlo per model -> output/report.html (pool-facing)
 tippspiel diagnose --predictor elo_poisson           # single-model Claude diagnostic report -> output/diagnostic.{md,json}
 tippspiel diagnose --predictor elo_poisson --no-sim  # fast, predictor-only (skips Monte Carlo)
 tippspiel verify --predictor elo_poisson             # backtest a predictor vs a completed tournament -> output/verify.{md,json}
-tippspiel tune              # sweep elo_poisson params vs the completed-tournament backtests -> output/tune.{md,json}
+tippspiel tune --predictor elo_poisson               # sweep elo_poisson params (fast)
+tippspiel tune --predictor attack_defence_poisson    # staged A/D sweep (generation + predictor) + reality check (~few min)
 tippspiel build-elo         # recompute ratings from ~25y of historical results -> output/elo.{md,json}
 ```
 
@@ -73,14 +74,36 @@ seeded benchmarks (all men's tournaments — the historical results dataset is m
 beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`; scoring helper
 `score_tip` in `strategy/expected_points.py`.
 
-`tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
-`ko_goal_scale`) over the completed-tournament backtests and writes a leaderboard
-(`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
-tie-break on pool-points % of max; it also reports a leave-one-tournament-out generalisation
-check. The current `config.yaml` params are the tuned result. Code: `tippspiel/report/tuning.py`.
-Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
-goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
-advantage applies when a team plays in its own country (`venue_country == home.team_id`).
+`tippspiel tune --predictor <model>` is now **single-model**, like `verify`/`diagnose`
+(`--predictor` is required, no default). The objective is **blended** in both paths: rank by
+mean RPS (calibration), tie-break on pool-points % of max; both write `output/tune.{md,json}`
+and report a leave-one-tournament-out generalisation check. The current `config.yaml` params
+are the tuned result.
+
+- **`--predictor elo_poisson`** sweeps the elo-Poisson knobs (`mu`, `k`, `rho`,
+  `host_elo_bonus`, `ko_goal_scale`) against the official `teams.csv` ratings of the
+  completed-tournament backtests. Code: `tippspiel/report/tuning.py`. Fast (~seconds).
+- **`--predictor attack_defence_poisson`** runs a **staged** sweep because the two A/D
+  parameter groups act at different layers. **Stage 1** sweeps the `elo:` block knobs
+  (`learning_rate`, `lookback_years`, `recency_decay`, `ad_home_advantage`) — each grid
+  point regenerates per-tournament `(attack, defence)` ratings via the historical forward
+  pass (`tippspiel/elo/` + `AttackDefenceElo`), with the predictor held at config defaults.
+  **Stage 2** holds generation at Stage-1 best and sweeps the
+  `attack_defence_poisson` knobs (`base_log_rate`, `home_advantage`, `rho`, `ko_goal_scale`).
+  The synthesised per-tournament `teams` dicts (with official Elo preserved + computed
+  attack/defence injected) are cached by `(gen_params, tournament)` so Stage 2 reuses
+  Stage 1's forward passes. Combined recommendation = Stage 1 best × Stage 2 best, with a
+  final all-tournaments verify plus a **reality check** vs the actual completed tournaments
+  (per-tournament + pooled comparison of predicted vs actual mean goals/match, tendency
+  split, top-5 scorelines, tip composition, scoreline-matrix TVD, and a PASS/WARN/FAIL
+  verdict — flags the "always 1:0" pathology when modal-tip share crosses 70%). Code:
+  `tippspiel/report/ad_tuning.py` + `tippspiel/report/realism.py`. Cost: ~few minutes total
+  (24 gen × 5 tournaments forward passes + 72 predictor × 5 verifications).
+
+Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the
+knockout goal rate (applied in `EloPoissonPredictor.predict` /
+`AttackDefencePoissonPredictor.predict` when `match.stage.is_knockout`); host advantage
+applies when a team plays in its own country (`venue_country == home.team_id`).
 
 ## Elo builder (`build-elo`)
 

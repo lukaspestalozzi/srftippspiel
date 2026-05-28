@@ -50,11 +50,13 @@ def test_ratings_file_missing_raises():
 
 
 def test_cli_requires_predictor_for_single_model_commands(capsys):
-    # verify/diagnose still need a single --predictor; run/predict do not (they always
-    # run every configured predictor side by side).
-    rc = main(["verify", "--config", str(WC2026)])
-    assert rc == 2
-    assert "--predictor is required" in capsys.readouterr().err
+    # verify/diagnose/tune all build a single Predictor and require --predictor (no default).
+    # run/predict do not (they always run every configured predictor side by side).
+    for cmd in ("verify", "diagnose", "tune"):
+        rc = main([cmd, "--config", str(WC2026)])
+        assert rc == 2, f"{cmd} should require --predictor"
+        err = capsys.readouterr().err
+        assert "--predictor is required" in err, f"{cmd}: {err!r}"
 
 
 def test_cli_rejects_unknown_predictor(capsys):
