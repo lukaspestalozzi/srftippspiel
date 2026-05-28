@@ -30,43 +30,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The prediction model is a required CLI parameter (no default); reports are built for
-          # BOTH models. Default config (config.yaml = FIFA World Cup 2026) unless --config given.
+          # Default config (config.yaml = FIFA World Cup 2026) unless --config given.
           - name: validate-data
             args: validate-data
             artifact: validate-data-log
             path: output/validate-data.log
-          # --- elo_poisson: the official eloratings snapshot (teams.csv) ---
-          - name: predict-elo_poisson
-            args: predict --predictor elo_poisson
-            artifact: predict-elo_poisson-report
+          # run/predict run every configured predictor x both meta-strategies into one combined
+          # report.html, so they produce a single artifact each (no per-predictor variants).
+          - name: predict
+            args: predict
+            artifact: predict-report
             path: output/report.html
-          - name: run-elo_poisson
-            args: run --predictor elo_poisson
-            artifact: run-elo_poisson-report
+          - name: run
+            args: run
+            artifact: run-report
             path: output/report.html
+          # diagnose is still single-model: one artifact per predictor.
           - name: diagnose-elo_poisson
             args: diagnose --predictor elo_poisson
             artifact: diagnose-elo_poisson-report
             path: output/diagnostic.md
-          # --- attack_defence_poisson: the computed two-rating model (teams_attack_defence.csv) ---
-          - name: predict-attack_defence_poisson
-            args: predict --predictor attack_defence_poisson
-            artifact: predict-attack_defence_poisson-report
-            path: output/report.html
-          - name: run-attack_defence_poisson
-            args: run --predictor attack_defence_poisson
-            artifact: run-attack_defence_poisson-report
-            path: output/report.html
           - name: diagnose-attack_defence_poisson
             args: diagnose --predictor attack_defence_poisson
             artifact: diagnose-attack_defence_poisson-report
             path: output/diagnostic.md
-          # Rank-optimising strategy: tips that aim to WIN the pool by anticipating the field.
-          - name: run-rankopt
-            args: run --strategy rank_optimizing --predictor elo_poisson
-            artifact: run-rankopt-report
-            path: output/report.html
           # Predictor-accuracy backtests: each completed tournament x each model.
           - name: verify-euro2016-elo_poisson
             args: verify --config configs/euro2016.yaml --predictor elo_poisson
