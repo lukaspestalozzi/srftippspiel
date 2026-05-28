@@ -7,12 +7,17 @@ a file and all downstream predictions and simulations are conditioned on them.
 
 ## What it does
 
-1. **Predicts** each match as a full scoreline distribution (Elo-Poisson model).
-2. **Optimises** the tip per match to maximise expected pool points (not just the most
-   likely scoreline — those differ, and the difference is where the edge is).
-3. **Simulates** the whole tournament 50,000 times (Monte Carlo) to get group-advancement
-   and title probabilities and the recommended World Champion.
-4. **Reports** everything in a single self-contained, offline-openable `report.html` with
+1. **Predicts** each match as a full scoreline distribution under **two** rating models —
+   the official eloratings.net snapshot (`elo_poisson`) and a computed attack/defence
+   model (`attack_defence_poisson`).
+2. **Optimises** the tip under **two** meta-strategies — EV-optimal (maximise own expected
+   points) and pool-rank (maximise the probability of winning the pool against a modelled
+   field). **Four tips per match: 2 models × 2 strategies.**
+3. **Simulates** the whole tournament 50,000 times **per model** (Monte Carlo) to get
+   group-advancement and title probabilities, the recommended World Champion, and the
+   other bonus answers — separately for each model.
+4. **Reports** everything in a single self-contained, offline-openable, mobile-friendly
+   `report.html` with a 2×2 tip matrix per fixture, a per-model outcomes section, and
    interactive charts.
 
 ## Install
@@ -27,17 +32,19 @@ Requires Python 3.11+. Dependencies: numpy, plotly, jinja2, pyyaml (+ pytest for
 
 ```bash
 tippspiel validate-data                              # check input files for schema/consistency errors
-tippspiel predict --predictor elo_poisson            # group-stage predictions + tips only (Phase 1, no sim)
-tippspiel run --predictor attack_defence_poisson     # full pipeline: predict + 50k simulations + report
-tippspiel verify --predictor elo_poisson             # backtest a predictor on a completed tournament
+tippspiel predict                                    # combined multi-model report, no simulation
+tippspiel run                                        # combined multi-model report + 50k Monte Carlo per model
+tippspiel verify --predictor elo_poisson             # backtest one predictor against a completed tournament
 tippspiel tune                                       # sweep elo_poisson params vs the completed-tournament backtests
-tippspiel run --config configs/euro2016.yaml --predictor elo_poisson   # a different tournament
+tippspiel run --config configs/euro2016.yaml         # the combined report for a different tournament
 ```
 
-The prediction model is a **required** `--predictor` flag (no default) for every command that
-predicts: `elo_poisson` uses the official eloratings snapshot (`teams.csv`); `attack_defence_poisson`
-uses the computed two-rating file (`teams_attack_defence.csv`). The report is written to
-`output/report.html` (configurable). A full `run` completes in a few seconds.
+`run` and `predict` always run **every** configured predictor and present both meta-strategies
+side by side — no `--predictor` flag needed. The single-model commands `verify` and `diagnose`
+still **require** `--predictor` (no default): `elo_poisson` uses the official eloratings snapshot
+(`teams.csv`); `attack_defence_poisson` uses the computed two-rating file
+(`teams_attack_defence.csv`). The report is written to `output/report.html` (configurable). A full
+`run` takes a few seconds longer than a single-model pass (it runs the simulator once per model).
 
 ## Multiple tournaments & verification
 
@@ -146,10 +153,11 @@ In a large pool (~200,000 entrants), the EV-maximising slate scores well but rar
 thousands of sharp entrants converge on the same EV-optimal scorelines. `RankOptimizingStrategy`
 instead maximises `P(rank ≤ top_n)` by modelling how the field tips (`FieldModel`, default
 `PredictorDerivedFieldModel`) and deliberately taking contrarian variance where it raises the
-win probability. Enable it with `strategy: { name: rank_optimizing, params: { pool_size: 200000,
-top_n: 1, expert_fraction: 0.6, temperature: 1.5 } }`; the default strategy remains
-`expected_points`. `tippspiel diagnose` reports an EV-vs-rank comparison (estimated win
-probability, expected points, and the contrarian deviations). The field model is derived from
+win probability. The combined `run`/`predict` report **always shows both strategies** for every
+configured predictor — field-model params (`pool_size`, `top_n`, `expert_fraction`, `temperature`)
+come from the config's `strategy:` block. `tippspiel diagnose` is single-strategy and uses the
+`name` from the config (default `expected_points`); it reports an EV-vs-rank comparison (estimated
+win probability, expected points, and the contrarian deviations). The field model is derived from
 the predictor (no real pool-tip data exists) and is a documented assumption.
 
 ### Phase 3 (partially implemented)
