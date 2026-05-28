@@ -511,8 +511,11 @@ def _fixture_block(m: Match, results: dict, runs: list[dict], weight: int) -> di
     teams0 = runs[0]["core"]["teams"]
     name_h = teams0[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams0[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
+    elo_h = teams0[m.home.team_id].elo if m.home.is_concrete else None
+    elo_a = teams0[m.away.team_id].elo if m.away.is_concrete else None
     block: dict = {
         "match_id": m.match_id, "home": name_h, "away": name_a,
+        "elo_home": elo_h, "elo_away": elo_a,
         "kickoff": m.kickoff, "stage": m.stage.value,
         "played": m.match_id in results, "result": None,
         "tip_rows": [], "tippable": False,

@@ -64,6 +64,8 @@
   .badge-tip { background: var(--ev-bg); color: var(--tip); border:1px solid var(--ev-bd); }
   .badge-rank { background: var(--rank-bg); color: var(--rank); border:1px solid var(--rank-bd); }
   .played-tag { color: var(--muted); font-weight: 400; }
+  .elo { color: var(--muted); font-weight: 400; font-size: .78rem;
+         font-variant-numeric: tabular-nums; margin-left: 3px; }
 
   /* 2x2 tip matrix (rows = models, cols = EV / Rank) */
   .tipmatrix { width: 100%; border-collapse: collapse; margin: 4px 0 0;
@@ -141,7 +143,9 @@
       <div class="summary-head">
         <span>
           {% if knockout %}<span class="badge badge-stage">{{ fx.stage }}</span> {% endif %}
-          {{ fx.home }} <span class="meta">vs</span> {{ fx.away }}
+          {{ fx.home }}{% if fx.elo_home %}<span class="elo">{{ fx.elo_home|round|int }}</span>{% endif %}
+          <span class="meta">vs</span>
+          {{ fx.away }}{% if fx.elo_away %}<span class="elo">{{ fx.elo_away|round|int }}</span>{% endif %}
           {% if fx.played %}
             <span class="played-tag">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>
           {% endif %}
