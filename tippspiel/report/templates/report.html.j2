@@ -3,104 +3,283 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tippspiel Predictor — {{ header.tournament }}</title>
+<title>Tippspiel — {{ header.tournament }}</title>
 <style>
-  :root { --fg:#222; --muted:#666; --line:#e2e2e2; --accent:#2c7fb8; --tip:#e6550d; }
+  :root {
+    --fg:#222; --muted:#666; --line:#e2e2e2; --soft:#f4f6f8;
+    --accent:#2c7fb8; --tip:#e6550d; --rank:#9a6700; --warn:#fff3cd;
+    --ev-bg:#fff7f0; --ev-bd:#f3d3bd; --rank-bg:#fff8e1; --rank-bd:#e7d8a3;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-         color: var(--fg); line-height: 1.5; margin: 0; background:#fafafa; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 80px; }
-  h1 { font-size: 1.7rem; margin: 0 0 4px; }
-  h2 { font-size: 1.3rem; border-bottom: 2px solid var(--line); padding-bottom: 6px;
-       margin-top: 40px; }
-  h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--fg); line-height: 1.5; margin: 0; background: #fafafa;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 80px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; line-height: 1.25; }
+  h2 { font-size: 1.25rem; border-bottom: 2px solid var(--line);
+       padding-bottom: 6px; margin: 36px 0 12px; }
+  h3 { font-size: 1.05rem; margin: 20px 0 8px; }
+  h4 { font-size: .95rem; margin: 14px 0 6px; color: var(--muted); }
+  p { margin: .5em 0; }
+  a { color: var(--accent); }
   .meta { color: var(--muted); font-size: .9rem; }
-  .toc { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; }
+
+  /* Header card */
+  .header-card { background:#fff; border:1px solid var(--line); border-radius:10px;
+                 padding:14px 16px; margin: 8px 0 16px; }
+  .model-pill { display:inline-block; background: var(--soft); border:1px solid var(--line);
+                border-radius: 999px; padding: 3px 10px; font-size: .82rem; margin-right: 6px; }
+  .model-pill code { background: transparent; }
+
+  /* TOC */
+  .toc { background:#fff; border:1px solid var(--line); border-radius:10px;
+         padding:12px 16px; margin: 8px 0 24px; }
   .toc ul { margin: 6px 0; padding-left: 20px; }
-  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a { text-decoration: none; }
   .toc a:hover { text-decoration: underline; }
-  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:0;
-          margin: 12px 0; overflow:hidden; }
-  details > summary { cursor:pointer; padding:12px 16px; font-weight:600;
-                      list-style:none; display:flex; justify-content:space-between;
-                      align-items:center; gap:12px; }
-  details > summary::-webkit-details-marker { display:none; }
-  details[open] > summary { border-bottom:1px solid var(--line); }
-  .summary-right { font-weight:400; color:var(--muted); font-size:.9rem; }
-  .fixture-body { padding: 8px 16px 16px; }
-  .tipline { background:#fff7f0; border:1px solid #f3d3bd; border-radius:6px;
-             padding:10px 14px; margin:10px 0; }
-  .tip-score { color:var(--tip); font-weight:700; font-size:1.15rem; }
+
+  /* Cards & fixture details */
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px;
+          margin: 10px 0; overflow: hidden; }
+  details > summary {
+    cursor: pointer; padding: 14px 16px; list-style: none;
+    display: grid; gap: 8px; font-weight: 600;
+    min-height: 44px;   /* touch target */
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary { border-bottom: 1px solid var(--line); background: var(--soft); }
+  .summary-head { display:flex; justify-content: space-between; align-items: baseline; gap: 12px;
+                  flex-wrap: wrap; }
+  .summary-head .meta { font-weight: 400; }
+  .fixture-body { padding: 12px 14px 16px; }
+
+  /* Badges */
   .badge { display:inline-block; background:#eef4f9; color:var(--accent);
-           border-radius:10px; padding:1px 8px; font-size:.78rem; }
-  .badge-diff { background:#fff3cd; color:#9a6700; }
-  .compareline { font-size:.9rem; color:var(--muted); margin:10px 0; }
-  .played { color: var(--muted); }
-  table.kv { border-collapse:collapse; font-size:.9rem; }
-  table.kv td { padding:2px 10px 2px 0; }
-  table.kv th { padding:2px 10px 2px 0; text-align:left; color:var(--muted); font-weight:600; }
-  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-  @media (max-width:760px){ .grid2 { grid-template-columns: 1fr; } }
-  footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line);
-           color:var(--muted); font-size:.85rem; }
+           border-radius:10px; padding:1px 8px; font-size:.78rem; vertical-align: 1px; }
+  .badge-stage { background:#e8eef3; color:#345; }
+  .badge-diff { background: var(--warn); color: var(--rank); }
+  .badge-agree { background:#e6f4ea; color:#1e7e34; }
+  .badge-tip { background: var(--ev-bg); color: var(--tip); border:1px solid var(--ev-bd); }
+  .badge-rank { background: var(--rank-bg); color: var(--rank); border:1px solid var(--rank-bd); }
+  .played-tag { color: var(--muted); font-weight: 400; }
+  .elo { color: var(--muted); font-weight: 400; font-size: .78rem;
+         font-variant-numeric: tabular-nums; margin-left: 3px; }
+  .ad { color: var(--accent); font-weight: 400; font-size: .78rem;
+        font-variant-numeric: tabular-nums; margin-left: 4px;
+        background: var(--soft); border-radius: 6px; padding: 0 5px;
+        border: 1px solid var(--line); cursor: help; }
+  .ad .atk { color: #1e7e34; }   /* green: goals scored */
+  .ad .def { color: #b03a3a; }   /* red:   goals conceded */
+  .ad .sep { color: var(--muted); margin: 0 1px; }
+
+  /* 2x2 tip matrix (rows = models, cols = EV / Rank) */
+  .tipmatrix { width: 100%; border-collapse: collapse; margin: 4px 0 0;
+               font-size: .92rem; table-layout: fixed; }
+  .tipmatrix th, .tipmatrix td { padding: 7px 8px; text-align: center;
+                                  border: 1px solid var(--line); }
+  .tipmatrix th { background: var(--soft); color: var(--muted); font-weight: 600;
+                  font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; }
+  .tipmatrix th.row { text-align: left; }
+  .tipmatrix td .score { font-weight: 700; color: var(--tip); font-size: 1.02rem; }
+  .tipmatrix td.rank .score { color: var(--rank); }
+  .tipmatrix td.contrarian { background: var(--rank-bg); }
+  .tipmatrix td .pts { color: var(--muted); font-size: .78rem; display: block; }
+  .tipmatrix .row-label { font-weight: 600; font-size: .85rem; }
+
+  /* Model charts grid */
+  .model-block { padding: 10px 0; border-top: 1px dashed var(--line); }
+  .model-block:first-of-type { border-top: 0; }
+  .model-block h4 { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .charts2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .charts2 { grid-template-columns: 1fr; } }
+  .plot { min-width: 0; }  /* let plotly shrink to container */
+
+  /* Strategy summary table */
+  table.summary { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  table.summary th, table.summary td { padding: 8px 10px; border-bottom: 1px solid var(--line);
+                                        text-align: right; }
+  table.summary th { background: var(--soft); }
+  table.summary th.l, table.summary td.l { text-align: left; }
+  .tablewrap { overflow-x: auto; }
+
+  /* Outcomes (per model) */
+  .outcomes-section { margin-top: 28px; }
+  .outcomes-section > h3 {
+    background: var(--soft); border-left: 4px solid var(--accent);
+    padding: 8px 12px; border-radius: 4px;
+  }
+
+  /* Footer */
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: .85rem; }
   .pre { background:#f4f4f4; border-radius:6px; padding:8px 10px; font-size:.82rem;
-         overflow-x:auto; }
+         overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+
+  /* Plotly: let charts fill the container */
+  .plotly-graph-div { width: 100% !important; }
 </style>
 <script type="text/javascript">{{ plotlyjs }}</script>
 </head>
 <body>
+
+{% macro tip_matrix(fx) %}
+  <div class="tablewrap"><table class="tipmatrix">
+    <thead><tr>
+      <th class="row">Model</th><th>EV</th><th>Rank</th>
+    </tr></thead>
+    <tbody>
+      {% for row in fx.tip_rows %}
+        <tr>
+          <th class="row row-label">{{ row.model_label }}</th>
+          <td><span class="score">{{ row.ev.home }}–{{ row.ev.away }}</span>
+              <span class="pts">{{ "%.2f"|format(row.ev.ev) }} pts</span></td>
+          <td class="rank{% if row.contrarian %} contrarian{% endif %}">
+              <span class="score">{{ row.rank.home }}–{{ row.rank.away }}</span>
+              <span class="pts">{{ "%.2f"|format(row.rank.ev) }} pts</span></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+{% endmacro %}
+
+{% macro fixture_card(fx, knockout=False) %}
+  <div class="card"><details>
+    <summary>
+      <div class="summary-head">
+        <span>
+          {% if knockout %}<span class="badge badge-stage">{{ fx.stage }}</span> {% endif %}
+          {{ fx.home }}{% if fx.elo_home %}<span class="elo">{{ fx.elo_home|round|int }}</span>{% endif %}{% if fx.ad_home %}<span class="ad" title="A/D model — expected goals scored / conceded per match vs an average opponent"><span class="atk">{{ "%.1f"|format(fx.ad_home[0]) }}</span><span class="sep">/</span><span class="def">{{ "%.1f"|format(fx.ad_home[1]) }}</span></span>{% endif %}
+          <span class="meta">vs</span>
+          {{ fx.away }}{% if fx.elo_away %}<span class="elo">{{ fx.elo_away|round|int }}</span>{% endif %}{% if fx.ad_away %}<span class="ad" title="A/D model — expected goals scored / conceded per match vs an average opponent"><span class="atk">{{ "%.1f"|format(fx.ad_away[0]) }}</span><span class="sep">/</span><span class="def">{{ "%.1f"|format(fx.ad_away[1]) }}</span></span>{% endif %}
+          {% if fx.played %}
+            <span class="played-tag">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>
+          {% endif %}
+        </span>
+        <span class="meta">
+          {% if fx.kickoff %}{{ fx.kickoff | localtime }}{% endif %}
+          {% if fx.any_contrarian %} · <span class="badge badge-diff">contrarian</span>{% endif %}
+          {% if fx.tippable and not fx.agree_ev %} · <span class="badge badge-diff">models disagree</span>{% endif %}
+        </span>
+      </div>
+      {% if fx.tippable %}
+        {{ tip_matrix(fx) }}
+      {% elif not fx.played and fx.slot_note %}
+        <span class="meta">{{ fx.slot_note }}</span>
+      {% endif %}
+    </summary>
+    <div class="fixture-body">
+      {% if fx.played %}
+        <p class="played-tag">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
+      {% elif fx.tippable %}
+        {% for row in fx.tip_rows %}
+          <div class="model-block">
+            <h4>{{ row.model_label }}
+              <span class="badge badge-tip">EV {{ row.ev.home }}–{{ row.ev.away }}
+                ({{ "%.2f"|format(row.ev.ev) }} pts)</span>
+              <span class="badge badge-rank">Rank {{ row.rank.home }}–{{ row.rank.away }}
+                ({{ "%.2f"|format(row.rank.ev) }} pts){% if row.contrarian %} ·
+                <span class="badge badge-diff">contrarian</span>{% endif %}</span>
+            </h4>
+            <div class="charts2">
+              <div class="plot">{{ row.ldw_chart | safe }}</div>
+              <div class="plot">{{ row.heatmap | safe }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="meta">{{ fx.slot_note or "Not tippable yet." }}</p>
+      {% endif %}
+    </div>
+  </details></div>
+{% endmacro %}
+
 <div class="wrap">
 
-  <h1>Tippspiel Predictor — {{ header.tournament }}</h1>
+  <h1>Tippspiel — {{ header.tournament }}</h1>
   <p class="meta">
     Generated {{ header.generated_at }} ·
-    Predictor <b>{{ header.predictor_name }}</b> ·
-    Strategy <b>{{ header.strategy_name }}</b>
-    {% if header.mc_iterations %} · MC {{ "{:,}".format(header.mc_iterations) }} iters (seed {{ header.mc_seed }}){% endif %}
-    · {{ header.results_count }} result(s) incorporated
+    {{ header.results_count }} result(s) incorporated
+    {% if header.simulate and model_outcomes %}
+      · MC {{ "{:,}".format(model_outcomes[0].mc_iterations) }} iters/model
+      (seed {{ model_outcomes[0].mc_seed }})
+    {% endif %}
   </p>
-  <table class="kv meta">
-    <tr><td>Tournament</td><td>{{ header.tournament }}{% if header.config %} <span class="pre">({{ header.config }})</span>{% endif %}</td></tr>
-    <tr><td>Predictor</td><td><b>{{ header.predictor_name }}</b> <span class="pre">{{ header.predictor_params }}</span></td></tr>
-    <tr><td>Strategy</td><td><b>{{ header.strategy_name }}</b>{% if header.strategy_params %} <span class="pre">{{ header.strategy_params }}</span>{% endif %}</td></tr>
-    <tr><td>Elo source</td><td>{{ header.elo_source or "—" }}</td></tr>
-  </table>
+
+  <div class="header-card">
+    <div><b>Models</b> (each match gets one tip per cell — model × strategy):</div>
+    <div style="margin-top: 6px;">
+      {% for m in header.models %}
+        <span class="model-pill"><b>{{ m.label }}</b> · <code>{{ m.name }}</code>
+          · {{ m.ratings_file }}</span>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 8px;"><b>Strategies</b>:
+      <span class="badge badge-tip">EV-optimal</span>
+      <span class="badge badge-rank">Pool-rank (contrarian)</span>
+    </div>
+    <div class="meta" style="margin-top: 8px;">
+      After each team: <span class="elo">Elo</span>
+      <span class="ad"><span class="atk">scored</span><span class="sep">/</span><span class="def">conceded</span></span>
+      goals per match vs an average opponent (A/D model).
+    </div>
+    {% if header.elo_source %}
+      <div class="meta" style="margin-top: 4px;">Elo source: {{ header.elo_source }}</div>
+    {% endif %}
+  </div>
 
   <div class="toc">
     <b>Contents</b>
     <ul>
-      {% if strategy_comparison %}<li><a href="#strategy">Strategy comparison</a></li>{% endif %}
+      {% if strategy_summary %}<li><a href="#strategy">Strategy summary</a></li>{% endif %}
       <li><a href="#groups">Group-stage fixtures</a>
         <ul>{% for g in groups %}<li><a href="#group-{{ g.letter }}">Group {{ g.letter }}</a></li>{% endfor %}</ul>
       </li>
-      {% if groups and groups[0].advancement_chart %}<li><a href="#advancement">Group advancement</a></li>{% endif %}
       {% if knockout_fixtures %}<li><a href="#knockout">Knockout fixtures</a></li>{% endif %}
-      {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
-      {% if bracket_html %}<li><a href="#bracket">Knockout bracket</a></li>{% endif %}
-      {% if bonus %}<li><a href="#bonus">Bonus recommendations</a></li>{% endif %}
+      {% if model_outcomes %}
+        <li>Model outcomes
+          <ul>
+            {% for mo in model_outcomes %}
+              <li><a href="#outcomes-{{ mo.name }}">{{ mo.label }}</a></li>
+            {% endfor %}
+          </ul>
+        </li>
+      {% endif %}
       <li><a href="#caveats">Caveats</a></li>
     </ul>
   </div>
 
-  {% if strategy_comparison %}
-  <h2 id="strategy">Strategy comparison</h2>
+  {% if strategy_summary %}
+  <h2 id="strategy">Strategy summary</h2>
   <div class="card"><div class="fixture-body">
-    <p class="meta">Two ways to tip the slate: <b>EV-optimal</b> maximises your own expected
-      points, while <b>pool-winning</b> (rank-optimising) accepts contrarian variance to raise
-      the chance of finishing top in a {{ "{:,}".format(strategy_comparison.pool_size) }}-participant
-      pool. The active strategy is <b>{{ header.strategy_name }}</b>; the
-      {{ strategy_comparison.n_diff }} fixture(s) where the two disagree are marked below.</p>
-    <table class="kv">
-      <tr><th></th><th>EV-optimal</th><th>pool-winning</th></tr>
-      <tr><td>Est. chance of winning the pool</td>
-        <td>{{ "%.3g"|format(strategy_comparison.ev_p_win) }}</td>
-        <td>{{ "%.3g"|format(strategy_comparison.rank_p_win) }}</td></tr>
-      <tr><td>Total expected points</td>
-        <td>{{ "%.1f"|format(strategy_comparison.ev_total_ev) }}</td>
-        <td>{{ "%.1f"|format(strategy_comparison.rank_total_ev) }}</td></tr>
-      <tr><td>Tips that deviate</td>
-        <td colspan="2">{{ strategy_comparison.n_diff }} of {{ strategy_comparison.n_tippable }}</td></tr>
-    </table>
+    <p class="meta"><b>EV-optimal</b> maximises your own expected points;
+      <b>Pool-rank</b> accepts contrarian variance to raise the chance of finishing top of a
+      {{ "{:,}".format(strategy_summary.pool_size) }}-participant pool. Both are computed for
+      every model — pick whichever combination matches your taste.</p>
+    <div class="tablewrap">
+      <table class="summary">
+        <thead><tr>
+          <th class="l">Model</th>
+          <th>EV pwin</th><th>Rank pwin</th>
+          <th>EV pts</th><th>Rank pts</th>
+          <th>Contrarian deviations</th>
+        </tr></thead>
+        <tbody>
+          {% for r in strategy_summary.rows %}
+          <tr>
+            <td class="l"><b>{{ r.model_label }}</b><br>
+              <span class="meta">{{ r.model_name }}</span></td>
+            <td>{{ "%.3g"|format(r.ev_p_win) }}</td>
+            <td>{{ "%.3g"|format(r.rank_p_win) }}</td>
+            <td>{{ "%.1f"|format(r.ev_total_ev) }}</td>
+            <td>{{ "%.1f"|format(r.rank_total_ev) }}</td>
+            <td>{{ r.n_diff }} / {{ r.n_tippable }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div></div>
   {% endif %}
 
@@ -108,102 +287,59 @@
   {% for g in groups %}
     <h3 id="group-{{ g.letter }}">Group {{ g.letter }}</h3>
     {% for fx in g.fixtures %}
-      <div class="card"><details {% if not fx.played %}open{% endif %}>
-        <summary>
-          <span>{{ fx.home }} vs {{ fx.away }}
-            {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
-          </span>
-          <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% endif %}</span>
-        </summary>
-        <div class="fixture-body">
-          {% if fx.played %}
-            <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
-          {% else %}
-            {% if fx.tip %}
-            <div class="tipline">
-              Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
-              <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
-              {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
-            </div>
-            {% endif %}
-            {% if fx.compare and fx.compare.differs %}
-            <div class="compareline">Strategy split — EV-optimal
-              <b>{{ fx.compare.ev_home }}–{{ fx.compare.ev_away }}</b>, pool-winning
-              <b>{{ fx.compare.rank_home }}–{{ fx.compare.rank_away }}</b>
-              <span class="badge badge-diff">contrarian</span></div>
-            {% endif %}
-            <div class="grid2">
-              <div>{{ fx.ldw_chart | safe }}</div>
-              <div>{{ fx.heatmap | safe }}</div>
-            </div>
-          {% endif %}
-        </div>
-      </details></div>
+      {{ fixture_card(fx) }}
     {% endfor %}
   {% endfor %}
-
-  {% if groups and groups[0].advancement_chart %}
-  <h2 id="advancement">Group advancement</h2>
-  {% for g in groups %}{% if g.advancement_chart %}{{ g.advancement_chart | safe }}{% endif %}{% endfor %}
-  {% endif %}
 
   {% if knockout_fixtures %}
   <h2 id="knockout">Knockout fixtures</h2>
   {% for fx in knockout_fixtures %}
-    <div class="card"><details {% if fx.tip and not fx.played %}open{% endif %}>
-      <summary>
-        <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
-          {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
-        </span>
-        <span class="summary-right">{% if fx.tip %}tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %}participants TBD{% endif %}</span>
-      </summary>
-      <div class="fixture-body">
-        {% if fx.tip %}
-          <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
-            <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span></div>
-          {% if fx.compare and fx.compare.differs %}
-          <div class="compareline">Strategy split — EV-optimal
-            <b>{{ fx.compare.ev_home }}–{{ fx.compare.ev_away }}</b>, pool-winning
-            <b>{{ fx.compare.rank_home }}–{{ fx.compare.rank_away }}</b>
-            <span class="badge badge-diff">contrarian</span></div>
-          {% endif %}
-          <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
-        {% else %}
-          <p class="meta">{{ fx.slot_note }}</p>
-          {% if fx.occupants_chart %}{{ fx.occupants_chart | safe }}{% endif %}
-        {% endif %}
-      </div>
-    </details></div>
+    {{ fixture_card(fx, knockout=True) }}
   {% endfor %}
   {% endif %}
 
-  {% if title_odds_chart %}
-  <h2 id="title">Title odds</h2>
-  {{ title_odds_chart | safe }}
-  {% endif %}
+  {% for mo in model_outcomes %}
+    <div class="outcomes-section">
+      <h2 id="outcomes-{{ mo.name }}">Outcomes — {{ mo.label }}</h2>
+      <p class="meta">{{ mo.ratings_file }} · MC {{ "{:,}".format(mo.mc_iterations) }} iters
+        (seed {{ mo.mc_seed }}, max SE {{ "%.4f"|format(mo.mc_standard_error) }}).</p>
 
-  {% if bracket_html %}
-  <h2 id="bracket">Knockout bracket</h2>
-  {{ bracket_html | safe }}
-  {% endif %}
+      <h3>Title odds</h3>
+      <div class="card"><div class="fixture-body plot">{{ mo.title_odds_chart | safe }}</div></div>
 
-  {% if bonus %}
-  <h2 id="bonus">Bonus recommendations</h2>
-  {% for b in bonus %}
-    <div class="card"><div class="fixture-body">
-      <h3 style="margin-top:4px">{{ b.question }} <span class="badge">{{ b.points }} pts</span></h3>
-      <p>Recommended: <b>{{ b.answer }}</b> ({{ "%.1f"|format(b.prob*100) }}%)
-        {% if b.runner_up %}· runner-up {{ b.runner_up }} ({{ "%.1f"|format(b.runner_up_prob*100) }}%){% endif %}</p>
-      {% if b.chart %}{{ b.chart | safe }}{% endif %}
-    </div></div>
+      <h3>Group advancement</h3>
+      {% for ac in mo.advancement_charts %}
+        <div class="card"><div class="fixture-body plot">{{ ac.chart | safe }}</div></div>
+      {% endfor %}
+
+      <h3>Knockout bracket</h3>
+      <div class="card"><div class="fixture-body plot">{{ mo.bracket_html | safe }}</div></div>
+
+      {% if mo.bonus %}
+        <h3>Bonus recommendations</h3>
+        {% for b in mo.bonus %}
+          <div class="card"><div class="fixture-body">
+            <h4>{{ b.question }} <span class="badge">{{ b.points }} pts</span></h4>
+            <p>Pick: <b>{{ b.answer }}</b> ({{ "%.1f"|format(b.prob*100) }}%)
+              {% if b.runner_up %}· runner-up {{ b.runner_up }}
+                ({{ "%.1f"|format(b.runner_up_prob*100) }}%){% endif %}</p>
+            <div class="plot">{{ b.chart | safe }}</div>
+          </div></div>
+        {% endfor %}
+      {% endif %}
+    </div>
   {% endfor %}
-  {% endif %}
 
   <footer id="caveats">
     <h2 style="border:none">Caveats</h2>
     <p>{{ caveats }}</p>
+    <p class="meta">This report shows tips from every configured prediction model and both
+      meta-strategies. The “contrarian” cells (pool-rank slate ≠ EV slate) deliberately
+      sacrifice a little expected points for variance — useful only if you're playing to
+      <em>win</em> the pool, not to maximise your own score.</p>
   </footer>
 
 </div>
 </body>
 </html>
+

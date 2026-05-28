@@ -7,7 +7,7 @@ import pytest
 import tippspiel
 import numpy as np
 
-from tippspiel.config import load_config, load_tournament
+from tippspiel.config import load_config, load_tournament, select_predictor
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.model.scoreline import ScorelineDistribution
 from tippspiel.pipeline import build_predictor
@@ -15,11 +15,11 @@ from tippspiel.report.backtest import _scoreline_nll, _tendency_rps, build_verif
 from tippspiel.strategy.expected_points import score_tip
 
 REPO = Path(tippspiel.__file__).parent.parent
-WOMENSEURO_CONFIG = REPO / "configs" / "womenseuro2025.yaml"
+EURO2016_CONFIG = REPO / "configs" / "euro2016.yaml"
 
 
 def _verify(config):
-    cfg = load_config(config)
+    cfg = select_predictor(load_config(config), "elo_poisson")
     bundle = load_tournament(config)
     prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
     teams = {t.team_id: t for t in prov.get_teams()}
@@ -38,10 +38,10 @@ def test_score_tip_hand_cases():
 
 
 def test_verify_totals_are_internally_consistent():
-    md, data = _verify(WOMENSEURO_CONFIG)
+    md, data = _verify(EURO2016_CONFIG)
 
     s = data["summary"]
-    assert s["all"]["matches"] == 31  # 24 group + 7 knockout
+    assert s["all"]["matches"] == 51  # 36 group + 15 knockout
     assert s["group"]["matches"] + s["knockout"]["matches"] == s["all"]["matches"]
     for key in ("all", "group", "knockout"):
         t = s[key]
@@ -50,10 +50,10 @@ def test_verify_totals_are_internally_consistent():
     # Per-stage points partition the overall totals.
     assert s["group"]["model"] + s["knockout"]["model"] == s["all"]["model"]
     assert s["group"]["max"] + s["knockout"]["max"] == s["all"]["max"]
-    # Knockout matches are worth double (7 matches x 20 max).
-    assert s["knockout"]["max"] == 7 * 20
+    # Knockout matches are worth double (15 matches x 20 max).
+    assert s["knockout"]["max"] == 15 * 20
     assert "Verification backtest" in md
-    assert len(data["matches"]) == 31
+    assert len(data["matches"]) == 51
 
 
 # (config, expected total matches, expected knockout matches) for the seeded benchmarks.
@@ -86,7 +86,7 @@ def test_calibration_metrics_reward_being_right():
 
 
 def test_verify_reports_calibration_block():
-    _md, data = _verify(WOMENSEURO_CONFIG)
+    _md, data = _verify(EURO2016_CONFIG)
     cal = data["calibration"]
     assert set(cal) == {"all", "group", "knockout"}
     assert 0.0 <= cal["all"]["mean_rps"] <= 1.0

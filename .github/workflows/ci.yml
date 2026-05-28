@@ -30,11 +30,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Default config (config.yaml = FIFA World Cup 2026) unless --config is given.
+          # Default config (config.yaml = FIFA World Cup 2026) unless --config given.
           - name: validate-data
             args: validate-data
             artifact: validate-data-log
             path: output/validate-data.log
+          # run/predict run every configured predictor x both meta-strategies into one combined
+          # report.html, so they produce a single artifact each (no per-predictor variants).
           - name: predict
             args: predict
             artifact: predict-report
@@ -43,35 +45,55 @@ jobs:
             args: run
             artifact: run-report
             path: output/report.html
-          # Rank-optimising strategy: tips that aim to WIN the pool by anticipating the field.
-          - name: run-rankopt
-            args: run --strategy rank_optimizing
-            artifact: run-rankopt-report
-            path: output/report.html
-          - name: diagnose
-            args: diagnose
-            artifact: diagnose-report
+          # diagnose is still single-model: one artifact per predictor.
+          - name: diagnose-elo_poisson
+            args: diagnose --predictor elo_poisson
+            artifact: diagnose-elo_poisson-report
             path: output/diagnostic.md
-          # Predictor-accuracy backtest against a completed tournament.
-          - name: verify-womenseuro2025
-            args: verify --config configs/womenseuro2025.yaml
-            artifact: verify-womenseuro2025
+          - name: diagnose-attack_defence_poisson
+            args: diagnose --predictor attack_defence_poisson
+            artifact: diagnose-attack_defence_poisson-report
+            path: output/diagnostic.md
+          # Predictor-accuracy backtests: each completed tournament x each model.
+          - name: verify-euro2016-elo_poisson
+            args: verify --config configs/euro2016.yaml --predictor elo_poisson
+            artifact: verify-euro2016-elo_poisson
             path: output/verify.md
-          - name: verify-wc2022
-            args: verify --config configs/wc2022.yaml
-            artifact: verify-wc2022
+          - name: verify-euro2016-attack_defence_poisson
+            args: verify --config configs/euro2016.yaml --predictor attack_defence_poisson
+            artifact: verify-euro2016-attack_defence_poisson
             path: output/verify.md
-          - name: verify-euro2024
-            args: verify --config configs/euro2024.yaml
-            artifact: verify-euro2024
+          - name: verify-wc2022-elo_poisson
+            args: verify --config configs/wc2022.yaml --predictor elo_poisson
+            artifact: verify-wc2022-elo_poisson
             path: output/verify.md
-          - name: verify-wc2018
-            args: verify --config configs/wc2018.yaml
-            artifact: verify-wc2018
+          - name: verify-wc2022-attack_defence_poisson
+            args: verify --config configs/wc2022.yaml --predictor attack_defence_poisson
+            artifact: verify-wc2022-attack_defence_poisson
             path: output/verify.md
-          - name: verify-euro2020
-            args: verify --config configs/euro2020.yaml
-            artifact: verify-euro2020
+          - name: verify-euro2024-elo_poisson
+            args: verify --config configs/euro2024.yaml --predictor elo_poisson
+            artifact: verify-euro2024-elo_poisson
+            path: output/verify.md
+          - name: verify-euro2024-attack_defence_poisson
+            args: verify --config configs/euro2024.yaml --predictor attack_defence_poisson
+            artifact: verify-euro2024-attack_defence_poisson
+            path: output/verify.md
+          - name: verify-wc2018-elo_poisson
+            args: verify --config configs/wc2018.yaml --predictor elo_poisson
+            artifact: verify-wc2018-elo_poisson
+            path: output/verify.md
+          - name: verify-wc2018-attack_defence_poisson
+            args: verify --config configs/wc2018.yaml --predictor attack_defence_poisson
+            artifact: verify-wc2018-attack_defence_poisson
+            path: output/verify.md
+          - name: verify-euro2020-elo_poisson
+            args: verify --config configs/euro2020.yaml --predictor elo_poisson
+            artifact: verify-euro2020-elo_poisson
+            path: output/verify.md
+          - name: verify-euro2020-attack_defence_poisson
+            args: verify --config configs/euro2020.yaml --predictor attack_defence_poisson
+            artifact: verify-euro2020-attack_defence_poisson
             path: output/verify.md
     steps:
       - uses: actions/checkout@v5

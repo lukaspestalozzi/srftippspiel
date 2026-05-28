@@ -8,9 +8,9 @@ from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.report.tuning import _blended_key, build_tuning
 
 REPO = Path(tippspiel.__file__).parent.parent
-WOMENSEURO = REPO / "configs" / "womenseuro2025.yaml"
+EURO2016 = REPO / "configs" / "euro2016.yaml"
 
-# Tiny grid so the test is fast (4 combos over one 31-match benchmark).
+# Tiny grid so the test is fast (4 combos over one 51-match benchmark).
 TINY_GRID = {
     "mu": [2.4, 2.6],
     "k": [0.0015],
@@ -29,8 +29,8 @@ def _benchmark(config):
 
 
 def test_build_tuning_produces_ranked_leaderboard():
-    cfg = load_config(WOMENSEURO)
-    data = build_tuning(cfg, [_benchmark(WOMENSEURO)], grid=TINY_GRID, top=5)[1]
+    cfg = load_config(EURO2016)
+    data = build_tuning(cfg, [_benchmark(EURO2016)], grid=TINY_GRID, top=5)[1]
 
     # The 4 grid combos, plus the base-config default if it isn't already one of them.
     assert data["grid_size"] in (4, 5)
@@ -44,7 +44,7 @@ def test_build_tuning_produces_ranked_leaderboard():
     assert 0.0 <= rec["mean_rps"] <= 1.0
     assert rec["mean_nll"] > 0.0
     # Leave-one-out has an entry per benchmark (here just one).
-    assert set(data["leave_one_out"]) == {"womenseuro2025"}
+    assert set(data["leave_one_out"]) == {"euro2016"}
 
 
 def test_blended_key_prefers_calibration_then_points():

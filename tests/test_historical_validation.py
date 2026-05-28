@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, load_tournament
+from tippspiel.config import load_config, load_tournament, select_predictor
 from tippspiel.data import historical_stats
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import build_predictor
@@ -26,7 +26,7 @@ REPO = Path(tippspiel.__file__).parent.parent
 
 @pytest.fixture(scope="module")
 def outcome():
-    cfg = load_config(REPO / "config.yaml")
+    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
     b = load_tournament(REPO / "config.yaml")
     prov = FileDataProvider(b.teams_file, b.fixtures_file, b.results_file,
                             b.thirds_allocation_file)

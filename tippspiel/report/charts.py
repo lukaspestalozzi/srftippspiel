@@ -9,10 +9,16 @@ import plotly.graph_objects as go
 
 from ..model.scoreline import ScorelineDistribution
 
-_DIV = dict(full_html=False, include_plotlyjs=False)
+_DIV = dict(
+    full_html=False,
+    include_plotlyjs=False,
+    default_width="100%",
+    config={"responsive": True, "displayModeBar": False},
+)
 
 
 def _fig_to_div(fig: go.Figure) -> str:
+    fig.update_layout(autosize=True)
     return fig.to_html(**_DIV)
 
 
@@ -48,11 +54,18 @@ def ldw_bar(dist: ScorelineDistribution, home: str, away: str) -> str:
 
 
 def scoreline_heatmap(
-    dist: ScorelineDistribution, rec_home: int | None = None, rec_away: int | None = None
+    dist: ScorelineDistribution,
+    rec_home: int | None = None,
+    rec_away: int | None = None,
+    *,
+    alt_home: int | None = None,
+    alt_away: int | None = None,
 ) -> str:
     """Interactive heatmap of the full (home goals × away goals) probability matrix.
 
-    rows = home goals (y), cols = away goals (x). The recommended cell is marked.
+    rows = home goals (y), cols = away goals (x). ``(rec_home, rec_away)`` is the EV-optimal
+    tip (solid orange box, "EV"). ``(alt_home, alt_away)`` is an optional second cell — the
+    rank-optimising tip when it differs from EV — drawn dashed with a "RANK" label.
     """
     m = dist.matrix
     gmax = dist.gmax
@@ -70,23 +83,29 @@ def scoreline_heatmap(
     if rec_home is not None and rec_away is not None:
         fig.add_shape(
             type="rect",
-            x0=rec_away - 0.5,
-            x1=rec_away + 0.5,
-            y0=rec_home - 0.5,
-            y1=rec_home + 0.5,
+            x0=rec_away - 0.5, x1=rec_away + 0.5,
+            y0=rec_home - 0.5, y1=rec_home + 0.5,
             line=dict(color="#e6550d", width=3),
         )
         fig.add_annotation(
-            x=rec_away,
-            y=rec_home,
-            text="TIP",
-            showarrow=False,
-            font=dict(color="#e6550d", size=11),
-            yshift=-16,
+            x=rec_away, y=rec_home, text="EV",
+            showarrow=False, font=dict(color="#e6550d", size=11), yshift=-16,
+        )
+    if (alt_home is not None and alt_away is not None
+            and (alt_home, alt_away) != (rec_home, rec_away)):
+        fig.add_shape(
+            type="rect",
+            x0=alt_away - 0.5, x1=alt_away + 0.5,
+            y0=alt_home - 0.5, y1=alt_home + 0.5,
+            line=dict(color="#9a6700", width=2, dash="dash"),
+        )
+        fig.add_annotation(
+            x=alt_away, y=alt_home, text="RANK",
+            showarrow=False, font=dict(color="#9a6700", size=10), yshift=16,
         )
     fig.update_layout(
-        height=340,
-        margin=dict(l=50, r=10, t=30, b=45),
+        height=320,
+        margin=dict(l=40, r=10, t=20, b=40),
         xaxis_title="Away goals",
         yaxis_title="Home goals",
         xaxis=dict(dtick=1),

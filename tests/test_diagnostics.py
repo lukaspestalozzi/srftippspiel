@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import tippspiel
-from tippspiel.config import load_config, load_tournament
+from tippspiel.config import load_config, load_tournament, select_predictor
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import _predict_tippable, build_predictor, build_strategy
 from tippspiel.report.diagnostics import DiagnosticsWriter, build_diagnostics
@@ -16,7 +16,7 @@ REPO = Path(tippspiel.__file__).parent.parent
 
 
 def _load():
-    cfg = load_config(REPO / "config.yaml")
+    cfg = select_predictor(load_config(REPO / "config.yaml"), "elo_poisson")
     bundle = load_tournament(REPO / "config.yaml")
     prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file,
                             bundle.results_file, bundle.thirds_allocation_file)

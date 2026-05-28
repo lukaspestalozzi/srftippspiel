@@ -5,31 +5,46 @@ Operational notes for working in this repo. (User-facing overview lives in `READ
 ## What this is
 
 `tippspiel` is a CLI that recommends scoreline tips + bonus answers for a football tournament
-betting pool, optimised to **maximise expected pool points**. Pipeline: predict each match as
-a scoreline distribution (Elo-Poisson) → pick the EV-maximising tip → Monte-Carlo the whole
-bracket 50k× → report. Re-runnable mid-tournament: played results in the tournament's
-`results.csv` condition everything downstream. Originally built for the FIFA World Cup 2026;
-now **multi-tournament** (see below).
+betting pool. Every match is predicted as a scoreline distribution under **both** rating models
+(`elo_poisson` = eloratings.net snapshot, `attack_defence_poisson` = computed attack/defence) and
+tipped under **both** meta-strategies — `expected_points` (maximise own EV) and `rank_optimizing`
+(maximise P(win the pool) against a modelled field). The Monte Carlo (50k× per model) drives
+advancement/title odds and bonus answers, separately per model. The combined `run`/`predict` writes
+one self-contained, mobile-friendly `output/report.html` carrying **four tips per fixture** (2 models
+× 2 strategies) plus per-model outcome sections. Re-runnable mid-tournament: played results in the
+tournament's `results.csv` condition everything downstream. Originally built for the FIFA World Cup
+2026; now **multi-tournament** (see below).
 
 ## Commands
 
 ```bash
 pip install -e ".[dev]"     # setup (Python 3.11+)
-pytest -q                   # run the full suite (~5s); ALWAYS run before committing
+pytest -q                   # run the full suite (~30s); ALWAYS run before committing
 tippspiel validate-data     # schema/consistency check on input files
-tippspiel predict           # group-stage tips only, no simulation
-tippspiel run               # full pipeline + output/report.html (pool-facing)
-tippspiel diagnose          # the Claude diagnostic report (see below) -> output/diagnostic.{md,json}
-tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
-tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
-tippspiel tune              # sweep predictor params vs the completed-tournament backtests -> output/tune.{md,json}
-tippspiel build-elo         # compute World Football Elo from ~25y of historical results -> output/elo.{md,json}
+tippspiel predict                                    # combined report (every predictor × EV/rank), no simulation
+tippspiel run                                        # combined report + Monte Carlo per model -> output/report.html (pool-facing)
+tippspiel diagnose --predictor elo_poisson           # single-model Claude diagnostic report -> output/diagnostic.{md,json}
+tippspiel diagnose --predictor elo_poisson --no-sim  # fast, predictor-only (skips Monte Carlo)
+tippspiel verify --predictor elo_poisson             # backtest a predictor vs a completed tournament -> output/verify.{md,json}
+tippspiel tune --predictor elo_poisson               # sweep elo_poisson params (fast)
+tippspiel tune --predictor attack_defence_poisson    # staged A/D sweep (generation + predictor) + reality check (~few min)
+tippspiel build-elo         # recompute ratings from ~25y of historical results -> output/elo.{md,json}
 ```
+
+**`run` and `predict` run every configured predictor automatically** — they take no
+`--predictor`/`--strategy` (any value passed is silently ignored), and the resulting `report.html`
+shows all models side by side with both meta-strategies per match. The **single-model** commands
+`diagnose` and `verify` still **require** `--predictor` (no default; they error without it).
+Choices: `elo_poisson` (reads the official eloratings snapshot `teams.csv`) or
+`attack_defence_poisson` (reads the computed `teams_attack_defence.csv`). Each config's
+`predictors:` block carries params for **both** models; `tune` always sweeps `elo_poisson`,
+`build-elo`/`validate-data` need no predictor.
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
 = FIFA World Cup 2026; further tournaments live under `configs/<name>.yaml`). A config file
-carries the engine defaults **and** a `tournament:` block (name, display name, `completed`
-flag, `data_dir`, Elo source, optional `thirds_allocation_file`) plus `bonus_questions:`.
+carries the engine defaults (`predictors:` map, strategy, simulation, report, `elo:`) **and** a
+`tournament:` block (name, display name, `completed` flag, `data_dir`, Elo source, optional
+`thirds_allocation_file`) plus `bonus_questions:`.
 
 ## Tournaments layer
 
@@ -42,29 +57,53 @@ KO rows reference group placings or earlier matches via structured refs in `home
 slot 74, drawn from the listed allowed groups), `WIN:M101` / `LOSE:M101` (winner/loser of a
 match). A completed tournament may instead list concrete KO participants. The engine is
 format-agnostic — it supports 48-team/12-group/best-8-thirds/R32-first (WC 2026),
-32-team/8-group/no-thirds/R16-first (WC 2022), 24-team/6-group/best-thirds/R16-first (Euro 2024)
-and 16-team/4-group/no-thirds/QF-first (Women's Euro 2025) alike. Add a tournament by dropping
+32-team/8-group/no-thirds/R16-first (WC 2022) and 24-team/6-group/best-thirds/R16-first
+(Euro 2024, Euro 2016) alike (a 16-team/4-group/no-thirds/QF-first format also works). Add a
+tournament by dropping
 in a data folder + a config file; no engine code changes. The third-place combination->slot
 table (FIFA "Annex C") is the **only** optional sidecar, needed only for an unplayed best-thirds
 format once the official table is confirmed; absent, a constraint-respecting bipartite matching
 over each slot's allowed groups is used (`tippspiel/simulation/bracket.py`).
 
-`tippspiel verify --config configs/<completed>.yaml` is the **predictor-accuracy backtest**: it
-predicts every actual match a-priori from the pre-tournament Elo snapshot, tips it, and totals the
-pool points scored vs the actual results (with the naive most-likely tip as a baseline, and the
-per-match max). It also reports **calibration** (mean tendency RPS + scoreline NLL).
-`womenseuro2025`, `wc2022`, `euro2024`, `wc2018` and `euro2020` are the seeded benchmarks; the
-model beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`; scoring helper
+`tippspiel verify --config configs/<completed>.yaml --predictor <model>` is the
+**predictor-accuracy backtest**: it predicts every actual match a-priori from the pre-tournament
+ratings snapshot, tips it, and totals the pool points scored vs the actual results (with the naive
+most-likely tip as a baseline, and the per-match max). It also reports **calibration** (mean
+tendency RPS + scoreline NLL). `euro2016`, `wc2022`, `euro2024`, `wc2018` and `euro2020` are the
+seeded benchmarks (all men's tournaments — the historical results dataset is men-only); the model
+beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`; scoring helper
 `score_tip` in `strategy/expected_points.py`.
 
-`tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
-`ko_goal_scale`) over the completed-tournament backtests and writes a leaderboard
-(`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
-tie-break on pool-points % of max; it also reports a leave-one-tournament-out generalisation
-check. The current `config.yaml` params are the tuned result. Code: `tippspiel/report/tuning.py`.
-Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
-goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
-advantage applies when a team plays in its own country (`venue_country == home.team_id`).
+`tippspiel tune --predictor <model>` is now **single-model**, like `verify`/`diagnose`
+(`--predictor` is required, no default). The objective is **blended** in both paths: rank by
+mean RPS (calibration), tie-break on pool-points % of max; both write `output/tune.{md,json}`
+and report a leave-one-tournament-out generalisation check. The current `config.yaml` params
+are the tuned result.
+
+- **`--predictor elo_poisson`** sweeps the elo-Poisson knobs (`mu`, `k`, `rho`,
+  `host_elo_bonus`, `ko_goal_scale`) against the official `teams.csv` ratings of the
+  completed-tournament backtests. Code: `tippspiel/report/tuning.py`. Fast (~seconds).
+- **`--predictor attack_defence_poisson`** runs a **staged** sweep because the two A/D
+  parameter groups act at different layers. **Stage 1** sweeps the `elo:` block knobs
+  (`learning_rate`, `lookback_years`, `recency_decay`, `ad_home_advantage`) — each grid
+  point regenerates per-tournament `(attack, defence)` ratings via the historical forward
+  pass (`tippspiel/elo/` + `AttackDefenceElo`), with the predictor held at config defaults.
+  **Stage 2** holds generation at Stage-1 best and sweeps the
+  `attack_defence_poisson` knobs (`base_log_rate`, `home_advantage`, `rho`, `ko_goal_scale`).
+  The synthesised per-tournament `teams` dicts (with official Elo preserved + computed
+  attack/defence injected) are cached by `(gen_params, tournament)` so Stage 2 reuses
+  Stage 1's forward passes. Combined recommendation = Stage 1 best × Stage 2 best, with a
+  final all-tournaments verify plus a **reality check** vs the actual completed tournaments
+  (per-tournament + pooled comparison of predicted vs actual mean goals/match, tendency
+  split, top-5 scorelines, tip composition, scoreline-matrix TVD, and a PASS/WARN/FAIL
+  verdict — flags the "always 1:0" pathology when modal-tip share crosses 70%). Code:
+  `tippspiel/report/ad_tuning.py` + `tippspiel/report/realism.py`. Cost: ~few minutes total
+  (24 gen × 5 tournaments forward passes + 72 predictor × 5 verifications).
+
+Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the
+knockout goal rate (applied in `EloPoissonPredictor.predict` /
+`AttackDefencePoissonPredictor.predict` when `match.stage.is_knockout`); host advantage
+applies when a team plays in its own country (`venue_country == home.team_id`).
 
 ## Elo builder (`build-elo`)
 
@@ -75,11 +114,16 @@ Elo** algorithm (logistic expectation, goal-difference multiplier, importance-ti
 `tournament` column, +home advantage on non-neutral ground, zero-sum updates) over a chronological
 forward pass, **weighting recent matches more heavily** (a lookback window + a half-life decay on
 K — both in the config `elo:` block). Writes a ranking + computed-vs-current comparison to
-`output/elo.{md,json}`; with `--write-teams PATH` it emits a `teams.csv` (overwriting only the
-`elo` column, reusing the tournament's own rows so the name→id map stays collision-free). A
-tournament opts in by pointing `tournament.teams_file` at the emitted file — the predictor reads
-`Team.elo` unchanged, so integration is **data + config only**. Default `--as-of` is today, or a
-completed tournament's start date − 1 day (no result leakage). Code: `tippspiel/elo/` (the
+`output/elo.{md,json}`; with `--write-teams PATH` it emits a teams CSV reusing the tournament's own
+rows so the name→id map stays collision-free. For `world_football` it overwrites the `elo` column;
+for `attack_defence` it **preserves** the official `elo` and only adds `attack`/`defence` columns
+(so the emitted file is a strict superset). By convention each tournament ships **two** ratings
+files — `teams.csv` (official eloratings, read by `elo_poisson`) and `teams_attack_defence.csv`
+(committed `build-elo --write-teams` output, read by `attack_defence_poisson`); each predictor's
+`ratings_kind` resolves its file (`TournamentBundle.teams_files` → `pipeline.ratings_file`), so the
+combined `run`/`predict` loads both files in one pass and `diagnose`/`verify` load whichever the
+`--predictor` selects — integration is **data only**, no `teams_file` edit needed. Default
+`--as-of` is today, or a completed tournament's start date − 1 day (no result leakage). Code: `tippspiel/elo/` (the
 `RatingModel` ABC in `ratings.py` is the seam between rating schemes; `world_football.py` is the
 single-rating implementation, `attack_defence.py` the two-rating one — see below) +
 `tippspiel/report/elo_report.py`. The chronological fold lives in `run_forward_pass` (callers read
@@ -107,10 +151,12 @@ absent ⇒ predictor falls back to the base rate). **Result on the 4 men's compl
 (full history, recency off, `learning_rate=0.03`, `ad_home_advantage=0`, predictor `rho=-0.10`,
 `ko_goal_scale=1.2`): pooled pool-points %max 46.4 vs eloratings 44.5 (+1.9pp), winning 3 of 4
 (loses only WC2022, the famous-upset edition), at parity RPS (0.1965 vs 0.1942).** The dataset is
-men-only, so the women's tournament stays on its eloratings snapshot. Select it per tournament:
-`elo: { model: attack_defence, recency_decay: false, lookback_years: 200 }` +
-`predictor: { name: attack_defence_poisson, params: { rho: -0.1, ko_goal_scale: 1.2 } }`, then point
-`teams_file` at a `build-elo --write-teams` output.
+men-only, so all shipped tournaments are men's. Each tournament's `elo:` block carries the
+attack/defence generation settings (`model: attack_defence, recency_decay: false,
+lookback_years: 200, learning_rate: 0.03, ad_home_advantage: 0`) and its config's `predictors:`
+block carries the `attack_defence_poisson` params (`rho: -0.1, ko_goal_scale: 1.2`). Regenerate the
+committed `teams_attack_defence.csv` with `build-elo --write-teams`, then run any command with
+`--predictor attack_defence_poisson` — the file is auto-resolved (no `teams_file` edit).
 
 ## The diagnostic report — my primary analysis tool
 
@@ -145,8 +191,10 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report) and
   `diagnostics.py` (my report).
 - `tippspiel/pipeline.py` — orchestration. `_run_core(cfg, bundle, ...)` returns the raw
-  objects shared by all reports; `run_pipeline()`/`write_diagnostics()`/`write_verification()`
-  build the HTML report / diagnostic / backtest respectively.
+  objects for single-model paths; `run_combined_pipeline()` iterates every configured predictor
+  (`_model_run` per predictor + `comparison_from_params` for each model's EV/rank slates) and
+  feeds `_build_combined_context` → the multi-model `report.html`. `write_diagnostics()` /
+  `write_verification()` build the diagnostic / backtest off `_run_core` (still single-model).
 - `tippspiel/config.py` — engine config (`load_config`) + tournament resolution from the same
   config file (`load_tournament` → `TournamentBundle`).
 - `tippspiel/report/backtest.py` — the `verify` historical backtest.
@@ -181,8 +229,11 @@ picks the lowest-total scoreline capturing the dominant tendency.
 ## Rank-optimising strategy
 
 `RankOptimizingStrategy` (`strategy/rank_optimizing.py`) tips to **win the pool**, not to
-maximise own EV. Select it with `strategy: { name: rank_optimizing, params: {...} }`
-(default stays `expected_points`). It models the field via `PredictorDerivedFieldModel`
+maximise own EV. The combined `run`/`predict` report **always shows both meta-strategies** for
+every predictor — field-model params (`pool_size`, `top_n`, `expert_fraction`, `temperature`) come
+from the config's `strategy:` block (consumed by `comparison_from_params`); the `name` field there
+only matters for `diagnose`, which uses the single configured strategy via `build_strategy` (default
+stays `expected_points`). It models the field via `PredictorDerivedFieldModel`
 (`expert_fraction`, `temperature`), samples `n_worlds` joint result vectors (each tippable
 match drawn independently from its predicted scoreline — pre-tournament that's the group
 matches, which are independent), and maximises `P(rank<=top_n)` for a `pool_size`-participant

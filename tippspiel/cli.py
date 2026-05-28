@@ -1,9 +1,11 @@
 """tippspiel CLI (spec §8).
 
-    tippspiel run            full pipeline: predict, simulate, report
-    tippspiel predict        group-stage predictions + tips only (no simulation)
-    tippspiel diagnose       write the Claude diagnostic report (markdown + JSON)
-    tippspiel verify         backtest the predictor against a completed tournament (pool points)
+    tippspiel run            combined pipeline across every configured predictor: predict,
+                              simulate, and emit one multi-model report.html (4 tips/match:
+                              2 ELO models × {EV, rank-optimising})
+    tippspiel predict        same combined multi-model report, no simulation
+    tippspiel diagnose       write the Claude diagnostic report (markdown + JSON, single model)
+    tippspiel verify         backtest one predictor against a completed tournament (single model)
     tippspiel validate-data  check input files for schema/consistency errors
 
 Each tournament is one config file; select it with ``--config <file>`` (default
@@ -20,48 +22,71 @@ from .config import load_config, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import (
     build_elo,
-    run_pipeline,
+    run_combined_pipeline,
     run_tuning,
     write_diagnostics,
     write_report,
     write_verification,
 )
 from .simulation.bracket import Bracket
+from .strategy.bonus import build_bonus_questions
 
 DEFAULT_CONFIG = "config.yaml"
 DEFAULT_BENCHMARKS = [
-    "configs/womenseuro2025.yaml",
+    "configs/euro2016.yaml",
     "configs/wc2022.yaml",
     "configs/euro2024.yaml",
     "configs/wc2018.yaml",
     "configs/euro2020.yaml",
 ]
+# Commands that build a single Predictor and therefore require an explicit --predictor.
+# ``run`` and ``predict`` no longer take one: they run every configured predictor.
+# ``tune`` is single-model (each predictor has its own grid + scoring path).
+_PREDICTION_COMMANDS = {"verify", "diagnose", "tune"}
+
+
+def _print_bonus_picks(run, bundle) -> None:
+    outcome = run["core"]["outcome"]
+    teams = run["core"]["teams"]
+    if outcome is None:
+        return
+    for q in build_bonus_questions(bundle.bonus_questions):
+        dist = q.resolve(outcome)
+        if not dist:
+            continue
+        pick, p = max(dist.items(), key=lambda kv: kv[1])
+        name = teams[pick].name if pick in teams else pick
+        print(f"    {q.question_id}: {name} ({p:.1%})")
 
 
 def _cmd_predict(cfg, bundle) -> int:
-    result = run_pipeline(cfg, bundle, simulate=False)
+    result = run_combined_pipeline(cfg, bundle, simulate=False)
     path = write_report(cfg, result["context"])
-    tips = result["tipset"].tips
-    print(f"[{bundle.display_name}] predicted {len(tips)} tippable fixture(s) "
-          f"(group stage, no simulation).")
+    runs = result["runs"]
+    print(f"[{bundle.display_name}] {len(runs)} model(s), no simulation:")
+    for run in runs:
+        n_tips = len(run["core"]["predictions"])
+        print(f"  {run['label']} ({run['name']}, {run['ratings_file']}): "
+              f"{n_tips} tippable fixture(s)")
     print(f"Report written to {path}")
     return 0
 
 
 def _cmd_run(cfg, bundle) -> int:
-    result = run_pipeline(cfg, bundle, simulate=True)
+    result = run_combined_pipeline(cfg, bundle, simulate=True)
     path = write_report(cfg, result["context"])
-    tips = result["tipset"].tips
-    outcome = result["outcome"]
-    print(f"[{bundle.display_name}] predicted {len(tips)} tippable fixture(s).")
-    if outcome is not None:
-        print(f"Monte Carlo: {outcome.mc_iterations:,} iterations (seed {outcome.mc_seed}), "
-              f"max SE {outcome.mc_standard_error:.4f}.")
-        answers = result["tipset"].bonus_answers
-        if answers:
-            print("Recommended bonus answers:")
-            for qid, ans in answers.items():
-                print(f"  {qid}: {ans}")
+    runs = result["runs"]
+    print(f"[{bundle.display_name}] {len(runs)} model(s):")
+    for run in runs:
+        core = run["core"]
+        outcome = core["outcome"]
+        n_tips = len(core["predictions"])
+        print(f"  {run['label']} ({run['name']}, {run['ratings_file']}): "
+              f"{n_tips} tippable fixture(s)")
+        if outcome is not None:
+            print(f"    MC {outcome.mc_iterations:,} iters (seed {outcome.mc_seed}), "
+                  f"max SE {outcome.mc_standard_error:.4f}")
+            _print_bonus_picks(run, bundle)
     print(f"Report written to {path}")
     return 0
 
@@ -101,7 +126,19 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     if missing:
         print(f"tune: benchmark config(s) not found: {missing}", file=sys.stderr)
         return 2
-    result = run_tuning(cfg, benchmark_configs, top=top)
+    name = cfg.predictor.name
+    if name == "elo_poisson":
+        result = run_tuning(cfg, benchmark_configs, top=top)
+        return _print_elo_tune(result)
+    if name == "attack_defence_poisson":
+        from .pipeline import run_ad_tuning
+        result = run_ad_tuning(cfg, benchmark_configs, top=top)
+        return _print_ad_tune(result)
+    print(f"tune: predictor {name!r} has no tuning grid implemented.", file=sys.stderr)
+    return 2
+
+
+def _print_elo_tune(result: dict) -> int:
     paths, data = result["paths"], result["data"]
     dm, rm = data["default_metrics"], data["recommended_metrics"]
     print(f"tuning written to {paths['markdown']} (+ {paths['json'].name}).")
@@ -113,6 +150,30 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     print("recommended params:")
     for key, val in data["recommended_params"].items():
         print(f"  {key}: {val}")
+    return 0
+
+
+def _print_ad_tune(result: dict) -> int:
+    paths, data = result["paths"], result["data"]
+    s1, s2 = data["stage1_generation"], data["stage2_predictor"]
+    cm = data["combined_metrics"]
+    print(f"A/D tuning written to {paths['markdown']} (+ {paths['json'].name}).")
+    print(f"benchmarks: {', '.join(data['benchmarks'])}.")
+    print(f"Stage 1 (generation, {s1['grid_size']} pts): "
+          f"default RPS {s1['default_metrics']['mean_rps']:.4f} -> "
+          f"best RPS {s1['recommended_metrics']['mean_rps']:.4f}; "
+          f"recommended: {s1['recommended_params']}")
+    print(f"Stage 2 (predictor,  {s2['grid_size']} pts): "
+          f"default RPS {s2['default_metrics']['mean_rps']:.4f} -> "
+          f"best RPS {s2['recommended_metrics']['mean_rps']:.4f}; "
+          f"recommended: {s2['recommended_params']}")
+    print(f"Combined: mean RPS {cm['mean_rps']:.4f}, model {cm['model']} pts "
+          f"({cm['model_pct']:.1f}% of max), {cm['exact_hits']} exact hits / "
+          f"{cm['matches']} matches.")
+    rv = data["reality_check"]["recommended"]["verdict"]
+    print(f"Reality check verdict: {rv['status']}")
+    for reason in rv["reasons"]:
+        print(f"  - {reason}")
     return 0
 
 
@@ -248,6 +309,13 @@ def _add_common_args(parser: argparse.ArgumentParser, *, with_default: bool) -> 
         help="override the tip strategy from the config (e.g. rank_optimizing); "
              "strategy params still come from the config (or built-in defaults)",
     )
+    parser.add_argument(
+        "--predictor", metavar="NAME",
+        default=(None if with_default else argparse.SUPPRESS),
+        help="prediction model: required for verify/diagnose (single-model); ignored by "
+             "run/predict (these always run every configured predictor side by side). "
+             "Choices: elo_poisson | attack_defence_poisson; params from config 'predictors:'.",
+    )
 
 
 def _override_strategy(cfg, name: str | None):
@@ -257,6 +325,25 @@ def _override_strategy(cfg, name: str | None):
     from dataclasses import replace
 
     return replace(cfg, strategy=replace(cfg.strategy, name=name))
+
+
+def _select_predictor(cfg, command: str, name: str | None):
+    """Resolve the active predictor. Prediction commands (verify/diagnose/tune) require
+    ``--predictor`` (no default). ``run``/``predict`` run every configured predictor and
+    don't need one. ``validate-data``/``build-elo`` don't build a predictor.
+    Returns ``(cfg, error_message_or_None)``."""
+    from .config import select_predictor
+
+    if command not in _PREDICTION_COMMANDS:
+        return cfg, None
+    if not name:
+        available = ", ".join(sorted(cfg.predictors))
+        return cfg, (f"{command}: --predictor is required (no default). "
+                     f"Choose one of: {available}.")
+    try:
+        return select_predictor(cfg, name), None
+    except ValueError as exc:
+        return cfg, f"{command}: {exc}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -298,6 +385,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cfg = load_config(config_path)
     cfg = _override_strategy(cfg, getattr(args, "strategy", None))
+    cfg, err = _select_predictor(cfg, args.command, getattr(args, "predictor", None))
+    if err:
+        print(err, file=sys.stderr)
+        return 2
     try:
         bundle = load_tournament(config_path)
     except (ValueError, KeyError) as exc:
