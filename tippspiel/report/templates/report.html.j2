@@ -66,6 +66,13 @@
   .played-tag { color: var(--muted); font-weight: 400; }
   .elo { color: var(--muted); font-weight: 400; font-size: .78rem;
          font-variant-numeric: tabular-nums; margin-left: 3px; }
+  .ad { color: var(--accent); font-weight: 400; font-size: .78rem;
+        font-variant-numeric: tabular-nums; margin-left: 4px;
+        background: var(--soft); border-radius: 6px; padding: 0 5px;
+        border: 1px solid var(--line); cursor: help; }
+  .ad .atk { color: #1e7e34; }   /* green: goals scored */
+  .ad .def { color: #b03a3a; }   /* red:   goals conceded */
+  .ad .sep { color: var(--muted); margin: 0 1px; }
 
   /* 2x2 tip matrix (rows = models, cols = EV / Rank) */
   .tipmatrix { width: 100%; border-collapse: collapse; margin: 4px 0 0;
@@ -143,9 +150,9 @@
       <div class="summary-head">
         <span>
           {% if knockout %}<span class="badge badge-stage">{{ fx.stage }}</span> {% endif %}
-          {{ fx.home }}{% if fx.elo_home %}<span class="elo">{{ fx.elo_home|round|int }}</span>{% endif %}
+          {{ fx.home }}{% if fx.elo_home %}<span class="elo">{{ fx.elo_home|round|int }}</span>{% endif %}{% if fx.ad_home %}<span class="ad" title="A/D model — expected goals scored / conceded per match vs an average opponent"><span class="atk">{{ "%.1f"|format(fx.ad_home[0]) }}</span><span class="sep">/</span><span class="def">{{ "%.1f"|format(fx.ad_home[1]) }}</span></span>{% endif %}
           <span class="meta">vs</span>
-          {{ fx.away }}{% if fx.elo_away %}<span class="elo">{{ fx.elo_away|round|int }}</span>{% endif %}
+          {{ fx.away }}{% if fx.elo_away %}<span class="elo">{{ fx.elo_away|round|int }}</span>{% endif %}{% if fx.ad_away %}<span class="ad" title="A/D model — expected goals scored / conceded per match vs an average opponent"><span class="atk">{{ "%.1f"|format(fx.ad_away[0]) }}</span><span class="sep">/</span><span class="def">{{ "%.1f"|format(fx.ad_away[1]) }}</span></span>{% endif %}
           {% if fx.played %}
             <span class="played-tag">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>
           {% endif %}
@@ -212,8 +219,13 @@
       <span class="badge badge-tip">EV-optimal</span>
       <span class="badge badge-rank">Pool-rank (contrarian)</span>
     </div>
+    <div class="meta" style="margin-top: 8px;">
+      After each team: <span class="elo">Elo</span>
+      <span class="ad"><span class="atk">scored</span><span class="sep">/</span><span class="def">conceded</span></span>
+      goals per match vs an average opponent (A/D model).
+    </div>
     {% if header.elo_source %}
-      <div class="meta" style="margin-top: 8px;">Elo source: {{ header.elo_source }}</div>
+      <div class="meta" style="margin-top: 4px;">Elo source: {{ header.elo_source }}</div>
     {% endif %}
   </div>
 

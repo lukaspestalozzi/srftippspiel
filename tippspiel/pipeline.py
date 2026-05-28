@@ -502,6 +502,26 @@ def _build_combined_context(
     }
 
 
+def _ad_goal_rates(team_id: str, runs: list[dict]) -> tuple[float, float] | None:
+    """Per-match goal rate pair (scored, conceded) for ``team_id`` vs an average opponent
+    under the attack/defence model. Returns ``None`` if no run carries A/D ratings for it.
+
+    ``exp(c + atk)`` is the team's expected goals scored vs an average opponent,
+    ``exp(c - def)`` its expected conceded — the same ``c + atk - def`` decomposition used
+    by ``AttackDefencePoissonPredictor`` to set match goal rates (with the opponent's
+    contribution set to 0). Stays in concrete goal units, which read intuitively next to Elo.
+    """
+    import math
+
+    for run in runs:
+        team = run["core"]["teams"].get(team_id)
+        if team is None or team.attack is None or team.defence is None:
+            continue
+        c = float(getattr(run["core"]["predictor"], "base_log_rate", 0.0))
+        return (math.exp(c + team.attack), math.exp(c - team.defence))
+    return None
+
+
 def _fixture_block(m: Match, results: dict, runs: list[dict], weight: int) -> dict:
     """One match's block for the combined report: per-model EV/Rank tips + charts.
 
@@ -513,9 +533,12 @@ def _fixture_block(m: Match, results: dict, runs: list[dict], weight: int) -> di
     name_a = teams0[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     elo_h = teams0[m.home.team_id].elo if m.home.is_concrete else None
     elo_a = teams0[m.away.team_id].elo if m.away.is_concrete else None
+    ad_h = _ad_goal_rates(m.home.team_id, runs) if m.home.is_concrete else None
+    ad_a = _ad_goal_rates(m.away.team_id, runs) if m.away.is_concrete else None
     block: dict = {
         "match_id": m.match_id, "home": name_h, "away": name_a,
         "elo_home": elo_h, "elo_away": elo_a,
+        "ad_home": ad_h, "ad_away": ad_a,
         "kickoff": m.kickoff, "stage": m.stage.value,
         "played": m.match_id in results, "result": None,
         "tip_rows": [], "tippable": False,
