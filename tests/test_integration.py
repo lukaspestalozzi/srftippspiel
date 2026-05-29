@@ -75,7 +75,6 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg
-    import tippspiel.pipeline as pl
     from tippspiel.data.file_provider import FileDataProvider
 
     orig = FileDataProvider.get_results

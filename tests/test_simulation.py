@@ -1,6 +1,5 @@
 """Monte Carlo simulator tests: reproducibility, convergence, partial-state (spec §10)."""
 
-import dataclasses
 from pathlib import Path
 
 import pytest

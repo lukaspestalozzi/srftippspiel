@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from .config import Config, TournamentBundle
 from .data.base import Odds1X2
 from .data.file_provider import FileDataProvider
-from .model.types import Match, MatchPrediction, Result, Team, TournamentOutcome
+from .model.types import Match, MatchPrediction, Team, TournamentOutcome
 from .predictors.base import Predictor
 from .predictors.elo_poisson import EloPoissonPredictor
 from .predictors.market_odds import MarketOddsPredictor

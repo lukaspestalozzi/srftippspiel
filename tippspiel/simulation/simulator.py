@@ -162,7 +162,6 @@ class TournamentSimulator:
             hg, ag = idx // self.k, idx % self.k
             home_win = hg > ag
             away_win = ag > hg
-            draw = ~(home_win | away_win)
             if self.penalty_model == "elo_weighted":
                 p_home = 1.0 / (1.0 + 10.0 ** (-(self.elo[home] - self.elo[away]) / 400.0))
                 pen_home = self.rng.random(self.n) < p_home
@@ -246,24 +245,24 @@ class TournamentSimulator:
             np.add.at(counts[first_reach], home, 1)
             np.add.at(counts[first_reach], away, 1)
             opp_dist[mid] = {"home": self._dist(home), "away": self._dist(away)}
-            w, l, hg, ag = self._play(home, away, mid)
+            w, loss, hg, ag = self._play(home, away, mid)
             np.add.at(team_goals, (it, home), hg)
             np.add.at(team_goals, (it, away), ag)
             zero_zero += (hg == 0) & (ag == 0)
             match_winner[mid] = w
-            match_loser[mid] = l
+            match_loser[mid] = loss
             if first_winner_metric:
                 np.add.at(counts[first_winner_metric], w, 1)
 
         for mid, hspec, aspec, stage in self.bracket.progression:
             home = match_winner[hspec[1]] if hspec[0] == "WIN" else match_loser[hspec[1]]
             away = match_winner[aspec[1]] if aspec[0] == "WIN" else match_loser[aspec[1]]
-            w, l, hg, ag = self._play(home, away, mid)
+            w, loss, hg, ag = self._play(home, away, mid)
             np.add.at(team_goals, (it, home), hg)
             np.add.at(team_goals, (it, away), ag)
             zero_zero += (hg == 0) & (ag == 0)
             match_winner[mid] = w
-            match_loser[mid] = l
+            match_loser[mid] = loss
             metric = self._winner_metric(stage)
             if metric:
                 np.add.at(counts[metric], w, 1)

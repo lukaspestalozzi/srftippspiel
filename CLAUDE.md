@@ -134,6 +134,10 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - All tunables live in `config.yaml`; nothing model-related is hardcoded in logic.
 - Tests live in `tests/`; mirror the `REPO = Path(tippspiel.__file__).parent.parent` fixture
   pattern and keep simulation iterations small (a few thousand) for speed.
+- **Pre-existing issues are always in scope — fix them as soon as you detect them.** If you
+  notice a lint warning, dead code, broken test, stale comment, or any other defect while
+  working — even if it predates your change and is unrelated to your task — fix it in the same
+  pass rather than leaving it. Run `ruff check tippspiel tests` and keep it clean.
 
 ## Phase status
 

@@ -9,7 +9,8 @@ LAYOUT = [(0, 1), (2, 3), (0, 2), (1, 3), (0, 3), (1, 2)]
 
 
 def _rank(home, away):
-    hg = np.array([home]); ag = np.array([away])
+    hg = np.array([home])
+    ag = np.array([away])
     rand = np.zeros((1, 4))
     order, pts, gd, gf = rank_group(hg, ag, LAYOUT, rand)
     return list(order[0]), pts[0], gd[0], gf[0]
@@ -39,7 +40,8 @@ def test_tiebreak_level4_head_to_head():
 def test_random_tiebreak_is_deterministic():
     # Total deadlock: all matches 0-0 -> every team identical. Random tiebreak must be
     # stable for a fixed rand vector.
-    hg = np.zeros((1, 6)); ag = np.zeros((1, 6))
+    hg = np.zeros((1, 6))
+    ag = np.zeros((1, 6))
     rand = np.array([[0.4, 0.1, 0.9, 0.2]])
     o1, *_ = rank_group(hg, ag, LAYOUT, rand)
     o2, *_ = rank_group(hg, ag, LAYOUT, rand)

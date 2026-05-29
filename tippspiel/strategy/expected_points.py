@@ -21,7 +21,6 @@ from ..model.stages import (
     PTS_GOAL_DIFF,
     PTS_HOME_GOALS,
     PTS_TENDENCY,
-    Stage,
 )
 from ..model.types import Match, MatchPrediction, Tip, TipSet, TournamentOutcome
 from .bonus import build_bonus_questions
