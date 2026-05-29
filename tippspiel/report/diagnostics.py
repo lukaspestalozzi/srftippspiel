@@ -46,13 +46,6 @@ def _git_head() -> str | None:
         return None
 
 
-def _expected_total_goals(matrix: np.ndarray) -> tuple[float, float]:
-    idx = np.arange(matrix.shape[0])
-    e_home = float((matrix.sum(axis=1) * idx).sum())
-    e_away = float((matrix.sum(axis=0) * idx).sum())
-    return e_home, e_away
-
-
 def _numeric_mean(dist: dict[str, float]) -> float | None:
     try:
         return sum(int(k) * v for k, v in dist.items())
@@ -91,7 +84,7 @@ def _fixture_records(fixtures, teams, predictions, tipset) -> list[dict]:
         rec = (tip.tip_home, tip.tip_away)
         comps = ev_components(dist, rec[0], rec[1], weight)
         nh, na, np_ = dist.most_likely_scorelines(1)[0]
-        e_home, e_away = _expected_total_goals(dist.matrix)
+        e_home, e_away = dist.expected_goals()
         records.append({
             "match_id": mid,
             "stage": match.stage.value,

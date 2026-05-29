@@ -54,6 +54,13 @@ class ScorelineDistribution:
         """P(home_goals - away_goals == d)."""
         return float(np.trace(self.matrix, offset=-d))
 
+    def expected_goals(self) -> tuple[float, float]:
+        """(E[home goals], E[away goals]) under the marginal distributions."""
+        idx = np.arange(self.matrix.shape[0])
+        e_home = float((self.matrix.sum(axis=1) * idx).sum())
+        e_away = float((self.matrix.sum(axis=0) * idx).sum())
+        return e_home, e_away
+
     def cell(self, h: int, a: int) -> float:
         if not (0 <= h <= self.gmax and 0 <= a <= self.gmax):
             return 0.0

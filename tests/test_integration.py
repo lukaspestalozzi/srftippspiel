@@ -43,7 +43,8 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     assert not re.search(r'<(script|link|img)[^>]*(src|href)=[\"\']https?://', html)
     # Champion recommendation present.
     assert result["tipset"].bonus_answers.get("champion")
-    for section in ("Group-stage fixtures", "Group advancement", "Title odds", "Bonus"):
+    for section in ("Group-stage fixtures", "Group advancement", "Title odds", "Bonus",
+                    "Model L/D/W", "Expected goals", "Top scorelines", "Why this tip"):
         assert section in html
 
 
@@ -68,6 +69,8 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     html = Path(path).read_text()
     # One odds line, gated to the two odds-backed fixtures only.
     assert html.count("Market-odds tip:") == 2
+    # The de-vigged 1X2 row appears in the data table for exactly those two fixtures.
+    assert html.count("Market (de-vigged)") == 2
     # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
     assert len(result["tipset"].tips) == 72
 
@@ -85,3 +88,49 @@ def test_played_match_excluded_from_tips(small_cfg):
         FileDataProvider.get_results = orig
     assert "G_A_1" not in result["tipset"].tips
     assert len(result["tipset"].tips) == 71
+
+
+def test_fixture_block_carries_underlying_data(small_cfg):
+    # Every tippable fixture exposes the underlying prediction numbers used in the report's
+    # data table; the EV breakdown must reconstruct the recommended tip's EV exactly.
+    result = run_pipeline(small_cfg, BUNDLE, simulate=False)
+    fixtures = [f for g in result["context"]["groups"] for f in g["fixtures"]]
+    tipped = [f for f in fixtures if f["data"] and f["tip"]]
+    assert tipped, "expected at least one tipped group fixture with data"
+    for f in tipped:
+        d = f["data"]
+        assert {"ldw", "exp_goals", "top3", "elo", "rec_components", "rec_cell_prob"} <= set(d)
+        # L/D/W is a partition; EV components sum to the recommended (displayed) EV.
+        assert d["ldw"]["home"] + d["ldw"]["draw"] + d["ldw"]["away"] == pytest.approx(1.0)
+        assert d["rec_components"]["total"] == pytest.approx(f["tip"]["ev"])
+        # Group fixtures have concrete teams -> Elo populated.
+        assert d["elo"] is not None
+        # Market probs appear only for odds-backed fixtures; when present they are a de-vigged
+        # 1X2 partition.
+        if d["market_probs"] is not None:
+            mp = d["market_probs"]
+            assert mp["home"] + mp["draw"] + mp["away"] == pytest.approx(1.0)
+        assert len(d["top3"]) == 3
+
+
+def test_fixture_data_elo_omitted_for_placeholder():
+    # A knockout fixture with a TBD side (placeholder ref) must omit Elo but still carry the
+    # tip's EV breakdown — the Elo guard mirrors the team-name resolution guard.
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from tippspiel.model.scoreline import ScorelineDistribution
+    from tippspiel.pipeline import _fixture_data
+
+    dist = ScorelineDistribution(np.ones((4, 4)) / 16)
+    m = SimpleNamespace(
+        match_id="K1",
+        home=SimpleNamespace(is_concrete=True, team_id="ARG"),
+        away=SimpleNamespace(is_concrete=False, team_id=None),
+    )
+    teams = {"ARG": SimpleNamespace(elo=1800.0)}
+    data = _fixture_data(m, teams, dist, (1, 0), weight=2, market=None)
+    assert data["elo"] is None
+    assert data["rec_components"] is not None
+    assert data["market_probs"] is None
