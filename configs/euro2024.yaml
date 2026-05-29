@@ -30,6 +30,7 @@ tournament:
   display_name: UEFA Euro 2024
   completed: true
   data_dir: tournaments/euro2024
+  odds_file: odds.csv     # ESPN public odds snapshot (moneylines, de-vigged at load)
   # Pre-tournament men's Elo (eloratings.net-style, ~June 2024); approximate, provisional.
   # Pre-tournament so the verification backtest has no result leakage.
   elo_source: "eloratings.net men's snapshot ~June 2024; approximate, provisional"

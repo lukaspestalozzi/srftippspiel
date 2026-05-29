@@ -31,6 +31,7 @@ tournament:
   display_name: UEFA Women's Euro 2025
   completed: true
   data_dir: tournaments/womenseuro2025
+  odds_file: odds.csv     # ESPN public odds snapshot (moneylines, de-vigged at load)
   # Pre-tournament ratings: best-effort June-2025 FIFA Women's World Ranking points (the FIFA
   # women's ranking is itself an Elo system). Approximate/provisional and rounded to signal
   # that; pre-tournament so the verification backtest has no result leakage.
