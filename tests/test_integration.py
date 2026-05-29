@@ -47,30 +47,29 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
         assert section in html
 
 
-def test_market_odds_third_tip_in_report(tmp_path, small_cfg):
-    # With a market_odds predictor + an odds file, the report shows a third "Market-odds tip"
-    # per fixture that has genuine odds (and only those).
+def test_market_odds_tips_in_report(tmp_path, small_cfg):
+    # An odds file makes the report show two extra "Market-odds tip" lines (EV-optimal and
+    # pool-winning) per fixture that has genuine odds — and only those fixtures. These render
+    # regardless of the configured predictor (here the default elo_poisson stays the recommended
+    # tip), so the market tips appear alongside the Elo recommendation.
     odds_csv = tmp_path / "odds.csv"
     odds_csv.write_text(
         "match_id,odds_home,odds_draw,odds_away\n"
-        "G_A_1,1.5,4.0,6.0\n"   # has odds -> third tip rendered
+        "G_A_1,1.5,4.0,6.0\n"   # has odds -> both market tip lines rendered
         "G_A_2,2.1,3.3,3.4\n"
     )
     cfg = dataclasses.replace(
         small_cfg,
-        predictor=dataclasses.replace(
-            small_cfg.predictor, name="market_odds",
-            params={"total_goals": 2.6, "gmax": 7, "ko_goal_scale": 1.0,
-                    "fallback_params": dict(small_cfg.predictor.params)},
-        ),
         report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path)),
     )
     bundle = dataclasses.replace(BUNDLE, odds_file=odds_csv)
     result = run_pipeline(cfg, bundle, simulate=False)
     path = write_report(cfg, result["context"])
     html = Path(path).read_text()
-    assert "Market-odds tip" in html
-    # Still 72 tips (the recommended tip uses the market path where odds exist, Elo elsewhere).
+    # Two odds lines, gated to the two odds-backed fixtures only.
+    assert html.count("Market-odds tip (EV):") == 2
+    assert html.count("Market-odds tip (pool-winning):") == 2
+    # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
     assert len(result["tipset"].tips) == 72
 
 

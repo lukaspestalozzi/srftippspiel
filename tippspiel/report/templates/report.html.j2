@@ -120,7 +120,8 @@
               Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
               <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
               {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
-              {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
+              {% if fx.market_tip %}<div class="meta">Market-odds tip (EV): <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
+              {% if fx.market_rank_tip %}<div class="meta">Market-odds tip (pool-winning): <b>{{ fx.market_rank_tip.home }}–{{ fx.market_rank_tip.away }}</b>{% if fx.market_rank_tip.differs %} <span class="badge badge-diff">contrarian</span>{% endif %}</div>{% endif %}
             </div>
             {% endif %}
             {% if fx.compare and fx.compare.differs %}
@@ -158,7 +159,8 @@
         {% if fx.tip %}
           <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
             <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>
-            {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}</div>
+            {% if fx.market_tip %}<div class="meta">Market-odds tip (EV): <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
+            {% if fx.market_rank_tip %}<div class="meta">Market-odds tip (pool-winning): <b>{{ fx.market_rank_tip.home }}–{{ fx.market_rank_tip.away }}</b>{% if fx.market_rank_tip.differs %} <span class="badge badge-diff">contrarian</span>{% endif %}</div>{% endif %}</div>
           {% if fx.compare and fx.compare.differs %}
           <div class="compareline">Strategy split — EV-optimal
             <b>{{ fx.compare.ev_home }}–{{ fx.compare.ev_away }}</b>, pool-winning
