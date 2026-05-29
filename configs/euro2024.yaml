@@ -13,9 +13,6 @@ predictor:
     host_elo_bonus: 40
     ko_goal_scale: 1.2
 
-strategy:
-  name: expected_points
-
 simulation:
   iterations: 50000
   seed: 20260611

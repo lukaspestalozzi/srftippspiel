@@ -33,8 +33,6 @@
   .tip-score { color:var(--tip); font-weight:700; font-size:1.15rem; }
   .badge { display:inline-block; background:#eef4f9; color:var(--accent);
            border-radius:10px; padding:1px 8px; font-size:.78rem; }
-  .badge-diff { background:#fff3cd; color:#9a6700; }
-  .compareline { font-size:.9rem; color:var(--muted); margin:10px 0; }
   .played { color: var(--muted); }
   table.kv { border-collapse:collapse; font-size:.9rem; }
   table.kv td { padding:2px 10px 2px 0; }
@@ -54,8 +52,7 @@
   <h1>Tippspiel Predictor — FIFA World Cup 2026</h1>
   <p class="meta">
     Generated {{ header.generated_at }} ·
-    Predictor <b>{{ header.predictor_name }}</b> ·
-    Strategy <b>{{ header.strategy_name }}</b>
+    Predictor <b>{{ header.predictor_name }}</b>
     {% if header.mc_iterations %} · MC {{ "{:,}".format(header.mc_iterations) }} iters (seed {{ header.mc_seed }}){% endif %}
     · {{ header.results_count }} result(s) incorporated
   </p>
@@ -65,7 +62,6 @@
   <div class="toc">
     <b>Contents</b>
     <ul>
-      {% if strategy_comparison %}<li><a href="#strategy">Strategy comparison</a></li>{% endif %}
       <li><a href="#groups">Group-stage fixtures</a>
         <ul>{% for g in groups %}<li><a href="#group-{{ g.letter }}">Group {{ g.letter }}</a></li>{% endfor %}</ul>
       </li>
@@ -77,28 +73,6 @@
       <li><a href="#caveats">Caveats</a></li>
     </ul>
   </div>
-
-  {% if strategy_comparison %}
-  <h2 id="strategy">Strategy comparison</h2>
-  <div class="card"><div class="fixture-body">
-    <p class="meta">Two ways to tip the slate: <b>EV-optimal</b> maximises your own expected
-      points, while <b>pool-winning</b> (rank-optimising) accepts contrarian variance to raise
-      the chance of finishing top in a {{ "{:,}".format(strategy_comparison.pool_size) }}-participant
-      pool. The active strategy is <b>{{ header.strategy_name }}</b>; the
-      {{ strategy_comparison.n_diff }} fixture(s) where the two disagree are marked below.</p>
-    <table class="kv">
-      <tr><th></th><th>EV-optimal</th><th>pool-winning</th></tr>
-      <tr><td>Est. chance of winning the pool</td>
-        <td>{{ "%.3g"|format(strategy_comparison.ev_p_win) }}</td>
-        <td>{{ "%.3g"|format(strategy_comparison.rank_p_win) }}</td></tr>
-      <tr><td>Total expected points</td>
-        <td>{{ "%.1f"|format(strategy_comparison.ev_total_ev) }}</td>
-        <td>{{ "%.1f"|format(strategy_comparison.rank_total_ev) }}</td></tr>
-      <tr><td>Tips that deviate</td>
-        <td colspan="2">{{ strategy_comparison.n_diff }} of {{ strategy_comparison.n_tippable }}</td></tr>
-    </table>
-  </div></div>
-  {% endif %}
 
   <h2 id="groups">Group-stage fixtures</h2>
   {% for g in groups %}
@@ -120,15 +94,8 @@
               Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
               <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
               {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
-              {% if fx.market_tip %}<div class="meta">Market-odds tip (EV): <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
-              {% if fx.market_rank_tip %}<div class="meta">Market-odds tip (pool-winning): <b>{{ fx.market_rank_tip.home }}–{{ fx.market_rank_tip.away }}</b>{% if fx.market_rank_tip.differs %} <span class="badge badge-diff">contrarian</span>{% endif %}</div>{% endif %}
+              {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
             </div>
-            {% endif %}
-            {% if fx.compare and fx.compare.differs %}
-            <div class="compareline">Strategy split — EV-optimal
-              <b>{{ fx.compare.ev_home }}–{{ fx.compare.ev_away }}</b>, pool-winning
-              <b>{{ fx.compare.rank_home }}–{{ fx.compare.rank_away }}</b>
-              <span class="badge badge-diff">contrarian</span></div>
             {% endif %}
             <div class="grid2">
               <div>{{ fx.ldw_chart | safe }}</div>
@@ -159,14 +126,7 @@
         {% if fx.tip %}
           <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
             <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>
-            {% if fx.market_tip %}<div class="meta">Market-odds tip (EV): <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
-            {% if fx.market_rank_tip %}<div class="meta">Market-odds tip (pool-winning): <b>{{ fx.market_rank_tip.home }}–{{ fx.market_rank_tip.away }}</b>{% if fx.market_rank_tip.differs %} <span class="badge badge-diff">contrarian</span>{% endif %}</div>{% endif %}</div>
-          {% if fx.compare and fx.compare.differs %}
-          <div class="compareline">Strategy split — EV-optimal
-            <b>{{ fx.compare.ev_home }}–{{ fx.compare.ev_away }}</b>, pool-winning
-            <b>{{ fx.compare.rank_home }}–{{ fx.compare.rank_away }}</b>
-            <span class="badge badge-diff">contrarian</span></div>
-          {% endif %}
+            {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}</div>
           <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
         {% else %}
           <p class="meta">{{ fx.slot_note }}</p>

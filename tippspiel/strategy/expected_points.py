@@ -24,7 +24,6 @@ from ..model.stages import (
     Stage,
 )
 from ..model.types import Match, MatchPrediction, Tip, TipSet, TournamentOutcome
-from .base import TipStrategy
 from .bonus import build_bonus_questions
 
 
@@ -94,7 +93,7 @@ def best_tip(dist: ScorelineDistribution, weight: int) -> tuple[int, int, float]
     return best_th, best_ta, best_ev
 
 
-class ExpectedPointsStrategy(TipStrategy):
+class ExpectedPointsStrategy:
     name = "expected_points"
 
     def __init__(self, bonus_question_configs=()) -> None:

@@ -2,7 +2,7 @@
 name: update-odds
 description: >-
   Refresh or add bookmaker odds (odds.csv) for a tippspiel tournament from ESPN's
-  public odds feed, so the report's two "Market-odds tip" lines populate with real
+  public odds feed, so the report's "Market-odds tip" line populates with real
   market data. Use when the user wants to update/refresh odds, add odds for a new
   or in-progress tournament, fill in newly-posted WC2026 matches, or fix/regenerate
   an odds.csv. Covers the ESPN JSON endpoints, the espn_odds_fetch maintainer tool,
@@ -12,7 +12,7 @@ description: >-
 # Update the odds data
 
 `odds.csv` (`match_id,odds_home,odds_draw,odds_away`, raw decimal, de-vigged at load) feeds the
-`MarketOddsPredictor` and the report's two per-fixture market-odds tips. This skill regenerates it
+`MarketOddsPredictor` and the report's per-fixture market-odds tip. This skill regenerates it
 from **ESPN's public JSON feed** — real sportsbook moneylines as *structured data*, so there is no
 HTML scraping and no language-model extraction step (and therefore no risk of fabricated numbers).
 
@@ -106,8 +106,8 @@ Wire the tournament's config once (idempotent): add under its `tournament:` bloc
 ```
 
 `config.yaml` (WC2026) and `configs/{wc2022,euro2024,euro2020,womenseuro2025}.yaml` already have it.
-The two market-odds tips render via a dedicated reporting pass **regardless of the active
-predictor** — you do NOT need to switch `predictor.name` to `market_odds` for the tips to show.
+The market-odds tip renders via a dedicated reporting pass **regardless of the active
+predictor** — you do NOT need to switch `predictor.name` to `market_odds` for the tip to show.
 
 Commit the `odds.csv` file(s) (and any `_ALIASES` edit). These are committed static snapshots, like
 Elo in `teams.csv`.

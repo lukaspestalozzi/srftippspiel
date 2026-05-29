@@ -220,21 +220,6 @@ def _add_common_args(parser: argparse.ArgumentParser, *, with_default: bool) -> 
         default=(DEFAULT_CONFIG if with_default else argparse.SUPPRESS),
         help=f"tournament config file (default: {DEFAULT_CONFIG}; others under configs/)",
     )
-    parser.add_argument(
-        "--strategy", metavar="NAME",
-        default=(None if with_default else argparse.SUPPRESS),
-        help="override the tip strategy from the config (e.g. rank_optimizing); "
-             "strategy params still come from the config (or built-in defaults)",
-    )
-
-
-def _override_strategy(cfg, name: str | None):
-    """Return ``cfg`` with its strategy name replaced (params preserved). No-op if name is None."""
-    if not name:
-        return cfg
-    from dataclasses import replace
-
-    return replace(cfg, strategy=replace(cfg.strategy, name=name))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -265,7 +250,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Config not found: {config_path}", file=sys.stderr)
         return 2
     cfg = load_config(config_path)
-    cfg = _override_strategy(cfg, getattr(args, "strategy", None))
     try:
         bundle = load_tournament(config_path)
     except (ValueError, KeyError) as exc:
