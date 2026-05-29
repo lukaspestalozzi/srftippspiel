@@ -33,7 +33,10 @@ flag, `data_dir`, Elo source, optional `thirds_allocation_file`) plus `bonus_que
 ## Tournaments layer
 
 A tournament's data lives under `tippspiel/data/tournaments/<name>/`: `teams.csv`,
-`fixtures.csv`, `results.csv` (+ an optional `thirds_allocation.json` sidecar). The
+`fixtures.csv`, `results.csv` (+ optional `thirds_allocation.json` and `odds.csv` sidecars).
+`odds.csv` (`match_id,odds_home,odds_draw,odds_away`, raw decimal odds, de-vigged at load)
+feeds the `MarketOddsPredictor` and the report's per-fixture "Market-odds tip"; wire it up with
+`tournament.odds_file: odds.csv` + `predictor.name: market_odds`. The
 **format is derived from the data**, not configured: group count/size from `fixtures.csv`,
 and the knockout chain + whether thirds qualify **from the knockout fixtures themselves** —
 KO rows reference group placings or earlier matches via structured refs in `home_ref`/`away_ref`:
@@ -90,7 +93,9 @@ picks the lowest-total scoreline capturing the dominant tendency.
 
 - `tippspiel/model/` — frozen dataclasses (`types.py`), `Stage` enum + scoring weights
   (`stages.py`), `ScorelineDistribution` (`scoreline.py`).
-- `tippspiel/predictors/` — `EloPoissonPredictor` (Phase-1/2); `market_odds.py` is a Phase-3 stub.
+- `tippspiel/predictors/` — `EloPoissonPredictor` (Phase-1/2) and `MarketOddsPredictor`
+  (Phase-3): de-vigged bookmaker 1X2 odds expanded to a scoreline (`expansion.py`) where an
+  `odds.csv` snapshot supplies them, falling back to Elo for every other (and synthetic) matchup.
 - `tippspiel/strategy/` — `expected_points.py` (EV optimiser; `ev_components()` is the
   reusable EV breakdown), `bonus.py` (bonus questions), `rank_optimizing.py`
   (`RankOptimizingStrategy` + `PredictorDerivedFieldModel` — see "Rank-optimising strategy").
@@ -154,6 +159,9 @@ exists, so the field model is a documented predictor-derived assumption.
 ## Phase status
 
 Phase 1 (group tips + report) and Phase 2 (Monte Carlo engine + bonus questions) are
-implemented. Phase 3: `RankOptimizingStrategy` + `FieldModel` are now implemented (see
-"Rank-optimising strategy"); `MarketOddsPredictor` remains an interface stub — implement the
-seam, don't refactor around it.
+implemented. Phase 3 is now implemented: `RankOptimizingStrategy` + `FieldModel` (see
+"Rank-optimising strategy") and `MarketOddsPredictor` (de-vigged 1X2 odds → scoreline, Elo
+fallback; activated per tournament via an `odds.csv` snapshot + `predictor.name: market_odds`,
+and surfaced as the report's per-fixture "Market-odds tip"). Committing sourced pre-tournament
+`odds.csv` snapshots for the `verify` benchmarks is the data step that quantifies the lift
+(RPS/NLL/pool-points vs the Elo baseline); the engine seam itself is complete and tested.
