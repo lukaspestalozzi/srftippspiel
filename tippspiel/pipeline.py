@@ -7,15 +7,14 @@ from datetime import datetime, timezone
 from .config import Config, TournamentBundle
 from .data.base import Odds1X2
 from .data.file_provider import FileDataProvider
-from .model.types import Match, MatchPrediction, Result, Team, TournamentOutcome
+from .model.types import Match, MatchPrediction, Team, TournamentOutcome
 from .predictors.base import Predictor
 from .predictors.elo_poisson import EloPoissonPredictor
 from .predictors.market_odds import MarketOddsPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
-from .strategy.base import TipStrategy
 from .strategy.bonus import build_bonus_questions
-from .strategy.expected_points import ExpectedPointsStrategy, expected_points
+from .strategy.expected_points import ExpectedPointsStrategy, best_tip, expected_points
 
 CAVEATS = (
     "The Elo-Poisson model is a reasonable forecaster but will not systematically "
@@ -39,27 +38,8 @@ def build_predictor(cfg: Config, odds: dict[str, Odds1X2] | None = None) -> Pred
     raise ValueError(f"Unknown predictor: {cfg.predictor.name}")
 
 
-def build_strategy(cfg: Config, bundle: TournamentBundle) -> TipStrategy:
-    if cfg.strategy.name == "expected_points":
-        return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
-    if cfg.strategy.name == "rank_optimizing":
-        from .strategy.rank_optimizing import PredictorDerivedFieldModel, RankOptimizingStrategy
-
-        p = cfg.strategy.params
-        field_model = PredictorDerivedFieldModel(
-            expert_fraction=p.get("expert_fraction", 0.6),
-            temperature=p.get("temperature", 1.5),
-        )
-        return RankOptimizingStrategy(
-            field_model=field_model,
-            pool_size=p.get("pool_size", 200_000),
-            top_n=p.get("top_n", 1),
-            n_worlds=p.get("n_worlds", 10_000),
-            candidates_per_match=p.get("candidates_per_match", 6),
-            seed=cfg.simulation.seed,
-            bonus_question_configs=bundle.bonus_questions,
-        )
-    raise ValueError(f"Unknown strategy: {cfg.strategy.name}")
+def build_strategy(cfg: Config, bundle: TournamentBundle) -> ExpectedPointsStrategy:
+    return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
 
 
 def _predict_tippable(
@@ -137,9 +117,8 @@ def _market_predictions(
     """Market-odds scoreline predictions for the report's per-fixture market tips.
 
     Runs a dedicated ``MarketOddsPredictor`` *regardless of the configured predictor*, over the
-    **full** tippable slate (Elo fallback where a fixture has no odds row) so the rank optimiser
-    that consumes these — :func:`_market_comparison` — sees correct field moments. Display is
-    gated to genuine-odds fixtures separately. Empty when no odds exist at all.
+    **full** tippable slate (Elo fallback where a fixture has no odds row). Display is gated to
+    genuine-odds fixtures separately. Empty when no odds exist at all.
     """
     if not odds:
         return {}
@@ -218,72 +197,23 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
-def _strategy_comparison(cfg, predictions, fixtures):
-    """EV-optimal vs rank-optimised slate for the report: a per-match ``compare_map`` (marking
-    where the two strategies deviate) and an aggregate summary. ``(None, {})`` when nothing is
-    tippable. Runs regardless of the active strategy so the report always shows both."""
-    from .strategy.rank_optimizing import comparison_from_params
-
-    params = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
-    comp = comparison_from_params(predictions, fixtures, params, seed=cfg.simulation.seed)
-    if comp is None:
-        return None, {}
-    compare_map = {}
-    for mid, ev in comp.ev_slate.items():
-        rk = comp.rank_slate[mid]
-        compare_map[mid] = {
-            "ev_home": ev[0], "ev_away": ev[1],
-            "rank_home": rk[0], "rank_away": rk[1],
-            "differs": ev != rk,
-        }
-    summary = {
-        "ev_p_win": comp.ev_p_win, "rank_p_win": comp.rank_p_win,
-        "ev_total_ev": comp.ev_total_ev, "rank_total_ev": comp.rank_total_ev,
-        "n_diff": comp.n_diff, "n_tippable": len(comp.ev_slate),
-        "pool_size": comp.pool_size, "top_n": comp.top_n,
-    }
-    return summary, compare_map
-
-
-def _market_comparison(cfg, market_predictions, fixtures) -> dict:
-    """EV-optimal and pool-winning (rank) tips derived from the **market-odds** predictions —
-    the source of the two per-fixture "Market-odds tip" lines. Reuses the same
-    ``comparison_from_params`` machinery as the Elo strategy comparison so the EV/rank logic is
-    identical; only the underlying scoreline distributions differ. ``{}`` when nothing tippable."""
-    from .strategy.rank_optimizing import comparison_from_params
-
-    if not market_predictions:
-        return {}
-    params = cfg.strategy.params if cfg.strategy.name == "rank_optimizing" else {}
-    comp = comparison_from_params(market_predictions, fixtures, params, seed=cfg.simulation.seed)
-    if comp is None:
-        return {}
-    out = {}
-    for mid, ev in comp.ev_slate.items():
-        rk = comp.rank_slate[mid]
-        out[mid] = {"ev": ev, "rank": rk, "differs": ev != rk}
-    return out
-
-
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor,
     market_predictions=None, odds=None,
 ) -> dict:
     market_predictions = market_predictions or {}
-    # The two per-fixture market tips: predictions carry the scoreline (for EV), the comparison
-    # map carries the EV-optimal and pool-winning tips, and ``odds_ids`` gates display to fixtures
-    # backed by genuine bookmaker odds (never a silent Elo-fallback duplicate).
+    # The per-fixture market tip: predictions carry the scoreline (for the EV-optimal tip), and
+    # ``odds_ids`` gates display to fixtures backed by genuine bookmaker odds (never a silent
+    # Elo-fallback duplicate).
     market = {
         "preds": market_predictions,
-        "compare": _market_comparison(cfg, market_predictions, fixtures),
         "odds_ids": set(odds or {}),
     }
-    strategy_comparison, compare_map = _strategy_comparison(cfg, predictions, fixtures)
     groups = _group_sections(
-        teams, fixtures, results, predictions, tipset, outcome, compare_map, market
+        teams, fixtures, results, predictions, tipset, outcome, market
     )
     knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, compare_map, market
+        teams, fixtures, results, predictions, tipset, outcome, market
     )
 
     title_odds_chart = None
@@ -303,14 +233,12 @@ def _build_report_context(
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "predictor_name": predictor.name,
         "predictor_params": getattr(predictor, "params", {}),
-        "strategy_name": cfg.strategy.name,
         "mc_iterations": outcome.mc_iterations if outcome else None,
         "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),
     }
     return {
         "header": header,
-        "strategy_comparison": strategy_comparison,
         "groups": groups,
         "knockout_fixtures": knockout_fixtures,
         "title_odds_chart": title_odds_chart,
@@ -321,14 +249,14 @@ def _build_report_context(
 
 
 def _fixture_block(
-    m, teams, results, predictions, tipset, weight, compare_map=None, market=None
+    m, teams, results, predictions, tipset, weight, market=None
 ) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "market_tip": None, "market_rank_tip": None,
-             "compare": None, "ldw_chart": None, "heatmap": None}
+             "tip": None, "naive": None, "market_tip": None,
+             "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
@@ -336,8 +264,6 @@ def _fixture_block(
     pred = predictions.get(m.match_id)
     if pred is None:
         return block
-    if compare_map is not None:
-        block["compare"] = compare_map.get(m.match_id)
     dist = pred.scoreline
     tip = tipset.tips.get(m.match_id)
     rec_h = rec_a = None
@@ -354,24 +280,20 @@ def _fixture_block(
 
 
 def _set_market_tips(block, m, weight, market) -> None:
-    """Attach the two market-odds tips (EV-optimal + pool-winning) to ``block`` — shown only for
-    fixtures backed by genuine bookmaker odds, so they're real market predictions rather than
-    silent Elo-fallback duplicates of the recommended tip. No-op when the fixture has no odds."""
+    """Attach the EV-optimal market-odds tip to ``block`` — shown only for fixtures backed by
+    genuine bookmaker odds, so it's a real market prediction rather than a silent Elo-fallback
+    duplicate of the recommended tip. No-op when the fixture has no odds."""
     if not market or m.match_id not in market["odds_ids"]:
         return
-    cmp = market["compare"].get(m.match_id)
     market_pred = market["preds"].get(m.match_id)
-    if cmp is None or market_pred is None:
+    if market_pred is None:
         return
     mdist = market_pred.scoreline
-    ev_h, ev_a = cmp["ev"]
-    rk_h, rk_a = cmp["rank"]
-    block["market_tip"] = {"home": ev_h, "away": ev_a,
-                           "ev": expected_points(mdist, ev_h, ev_a, weight)}
-    block["market_rank_tip"] = {"home": rk_h, "away": rk_a, "differs": cmp["differs"]}
+    th, ta, ev = best_tip(mdist, weight)
+    block["market_tip"] = {"home": th, "away": ta, "ev": ev}
 
 
-def _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None,
+def _group_sections(teams, fixtures, results, predictions, tipset, outcome,
                     market=None) -> list[dict]:
     by_group: dict[str, list[Match]] = {}
     for m in fixtures:
@@ -380,7 +302,7 @@ def _group_sections(teams, fixtures, results, predictions, tipset, outcome, comp
     sections = []
     for letter in sorted(by_group):
         ms = sorted(by_group[letter], key=lambda m: m.kickoff)
-        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1, compare_map,
+        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1,
                                  market) for m in ms]
         adv_chart = None
         if outcome is not None:
@@ -407,14 +329,14 @@ def _advancement_chart(letter, group_matches, teams, outcome):
     return charts.advancement_stacked_bar(letter, rows)
 
 
-def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None,
+def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
                        market=None) -> list[dict]:
     blocks = []
     for m in fixtures:
         if m.group is not None:  # group matches handled elsewhere
             continue
         if m.participants_known or m.match_id in results:
-            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2, compare_map,
+            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
                                          market))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."

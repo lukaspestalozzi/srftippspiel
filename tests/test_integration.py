@@ -48,14 +48,14 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
 
 
 def test_market_odds_tips_in_report(tmp_path, small_cfg):
-    # An odds file makes the report show two extra "Market-odds tip" lines (EV-optimal and
-    # pool-winning) per fixture that has genuine odds — and only those fixtures. These render
-    # regardless of the configured predictor (here the default elo_poisson stays the recommended
-    # tip), so the market tips appear alongside the Elo recommendation.
+    # An odds file makes the report show an extra "Market-odds tip" line per fixture that has
+    # genuine odds — and only those fixtures. It renders regardless of the configured predictor
+    # (here the default elo_poisson stays the recommended tip), so the market tip appears
+    # alongside the Elo recommendation.
     odds_csv = tmp_path / "odds.csv"
     odds_csv.write_text(
         "match_id,odds_home,odds_draw,odds_away\n"
-        "G_A_1,1.5,4.0,6.0\n"   # has odds -> both market tip lines rendered
+        "G_A_1,1.5,4.0,6.0\n"   # has odds -> market tip line rendered
         "G_A_2,2.1,3.3,3.4\n"
     )
     cfg = dataclasses.replace(
@@ -66,9 +66,8 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     result = run_pipeline(cfg, bundle, simulate=False)
     path = write_report(cfg, result["context"])
     html = Path(path).read_text()
-    # Two odds lines, gated to the two odds-backed fixtures only.
-    assert html.count("Market-odds tip (EV):") == 2
-    assert html.count("Market-odds tip (pool-winning):") == 2
+    # One odds line, gated to the two odds-backed fixtures only.
+    assert html.count("Market-odds tip:") == 2
     # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
     assert len(result["tipset"].tips) == 72
 
@@ -76,7 +75,6 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg
-    import tippspiel.pipeline as pl
     from tippspiel.data.file_provider import FileDataProvider
 
     orig = FileDataProvider.get_results

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..model.scoreline import ScorelineDistribution
 from ..model.stages import PTS_EXACT
-from ..strategy.expected_points import best_tip, expected_points, score_tip
+from ..strategy.expected_points import best_tip, score_tip
 from .diagnostics import _fixed_table, _json_default
 
 _NLL_EPS = 1e-12

@@ -14,9 +14,6 @@ predictor:
     host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
     ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
 
-strategy:
-  name: expected_points
-
 simulation:
   iterations: 50000
   seed: 20260611

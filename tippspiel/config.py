@@ -2,7 +2,7 @@
 
 Each tournament is one self-contained config file (``config.yaml`` is the default,
 FIFA World Cup 2026; further tournaments live under ``configs/<name>.yaml``). A config file
-carries both the engine defaults (predictor / strategy / simulation / report) and a
+carries both the engine defaults (predictor / simulation / report) and a
 ``tournament:`` block describing the tournament's data files, metadata and bonus questions.
 Select a tournament with ``--config <file>``. The seed is mandatory and surfaced in the
 report for reproducibility.
@@ -23,12 +23,6 @@ _DATA_ROOT = Path(__file__).parent / "data"
 class PredictorConfig:
     name: str
     params: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class StrategyConfig:
-    name: str
-    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -53,7 +47,6 @@ class BonusQuestionConfig:
 @dataclass(frozen=True)
 class Config:
     predictor: PredictorConfig
-    strategy: StrategyConfig
     simulation: SimulationConfig
     report: ReportConfig
     config_path: Path | None = None
@@ -101,10 +94,6 @@ def load_config(path: str | Path) -> Config:
             predictor=PredictorConfig(
                 name=raw["predictor"]["name"],
                 params=dict(raw["predictor"].get("params", {})),
-            ),
-            strategy=StrategyConfig(
-                name=raw["strategy"]["name"],
-                params=dict(raw["strategy"].get("params", {})),
             ),
             simulation=SimulationConfig(
                 iterations=int(sim["iterations"]),

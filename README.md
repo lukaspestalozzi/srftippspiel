@@ -128,36 +128,24 @@ change continuously.
 
 ## Architecture
 
-A pipeline with two designed-for-extension seams:
+A pipeline with a designed-for-extension predictor seam:
 
 - **`Predictor`** (`predictors/`) — match → scoreline distribution. Ships
   `EloPoissonPredictor` (multiplicative goal rates, optional Dixon-Coles low-score
   correction; host-venue advantage configurable via `host_elo_bonus`, default 0) and
   `MarketOddsPredictor` (de-vigged bookmaker 1X2 odds expanded to a scoreline where an
   `odds.csv` snapshot supplies them, Elo fallback otherwise).
-- **`TipStrategy`** (`strategy/`) — the whole slate of predictions + tournament outcome →
-  a complete set of tips. Ships `ExpectedPointsStrategy` (maximise own expected points) and
-  `RankOptimizingStrategy` (maximise the probability of *winning* the pool — see below).
+- **`ExpectedPointsStrategy`** (`strategy/`) — turns the whole slate of predictions +
+  tournament outcome into a complete set of tips, picking the scoreline that maximises expected
+  pool points for each fixture and the modal answer for each bonus question.
 
 The `TournamentSimulator` (`simulation/`) runs the vectorised Monte Carlo: group standings
 with exact FIFA tiebreakers (criteria 1–4; criterion 5 via a named seeded random
 tiebreak), best-8 third-placed selection, bracket assembly, and knockout progression.
 
-### Rank-optimising strategy (anticipating the field)
-
-In a large pool (~200,000 entrants), the EV-maximising slate scores well but rarely *wins* —
-thousands of sharp entrants converge on the same EV-optimal scorelines. `RankOptimizingStrategy`
-instead maximises `P(rank ≤ top_n)` by modelling how the field tips (`FieldModel`, default
-`PredictorDerivedFieldModel`) and deliberately taking contrarian variance where it raises the
-win probability. Enable it with `strategy: { name: rank_optimizing, params: { pool_size: 200000,
-top_n: 1, expert_fraction: 0.6, temperature: 1.5 } }`; the default strategy remains
-`expected_points`. `tippspiel diagnose` reports an EV-vs-rank comparison (estimated win
-probability, expected points, and the contrarian deviations). The field model is derived from
-the predictor (no real pool-tip data exists) and is a documented assumption.
-
 ### Phase 3 (implemented)
 
-`RankOptimizingStrategy` + `FieldModel` (above) and `MarketOddsPredictor` are implemented.
+`MarketOddsPredictor` is implemented.
 Activate the market predictor per tournament with `predictor: { name: market_odds, params: {
 total_goals: 2.6, gmax: 7, ko_goal_scale: 1.0, fallback_params: { ... Elo params ... } } }` and
 `tournament.odds_file: odds.csv`. Committing sourced pre-tournament odds for the `verify`
