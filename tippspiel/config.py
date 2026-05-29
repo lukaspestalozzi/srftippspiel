@@ -73,6 +73,7 @@ class TournamentBundle:
     fixtures_file: Path
     results_file: Path
     thirds_allocation_file: Path | None = None
+    odds_file: Path | None = None
     bonus_questions: list[BonusQuestionConfig] = field(default_factory=list)
     elo_source: str = ""
 
@@ -131,6 +132,7 @@ def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> Tourna
 
     data_dir = data_root / t["data_dir"]
     thirds = t.get("thirds_allocation_file")
+    odds = t.get("odds_file")
     return TournamentBundle(
         name=t["name"],
         display_name=t.get("display_name", t["name"]),
@@ -139,6 +141,7 @@ def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> Tourna
         fixtures_file=data_dir / t.get("fixtures_file", "fixtures.csv"),
         results_file=data_dir / t.get("results_file", "results.csv"),
         thirds_allocation_file=(data_dir / thirds) if thirds else None,
+        odds_file=(data_dir / odds) if odds else None,
         bonus_questions=[
             BonusQuestionConfig(id=q["id"], points=int(q["points"]))
             for q in raw.get("bonus_questions", [])

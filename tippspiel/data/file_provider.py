@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..model.stages import Stage
 from ..model.types import Match, Result, Team, TeamRef
-from .base import DataProvider
+from .base import DataProvider, Odds1X2
 
 
 def _parse_kickoff(raw: str) -> datetime:
@@ -26,6 +26,19 @@ def _parse_kickoff(raw: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _devig_proportional(odds_home: float, odds_draw: float, odds_away: float) -> Odds1X2:
+    """De-vig decimal 1X2 odds into a normalised probability triple.
+
+    Implied probabilities are ``1/odds``; their sum (the "booksum") exceeds 1 by the
+    bookmaker's margin. The proportional method scales them back to sum to 1 — the standard,
+    transparent default. ``method=`` is intentionally not exposed yet; Shin's method can be
+    added here later without an ``odds.csv`` schema change.
+    """
+    imp_h, imp_d, imp_a = 1.0 / odds_home, 1.0 / odds_draw, 1.0 / odds_away
+    booksum = imp_h + imp_d + imp_a
+    return Odds1X2(imp_h / booksum, imp_d / booksum, imp_a / booksum)
+
+
 class FileDataProvider(DataProvider):
     def __init__(
         self,
@@ -33,6 +46,7 @@ class FileDataProvider(DataProvider):
         fixtures_file: str | Path,
         results_file: str | Path,
         thirds_allocation_file: str | Path | None = None,
+        odds_file: str | Path | None = None,
     ) -> None:
         self.teams_file = Path(teams_file)
         self.fixtures_file = Path(fixtures_file)
@@ -40,6 +54,7 @@ class FileDataProvider(DataProvider):
         self.thirds_allocation_file = (
             Path(thirds_allocation_file) if thirds_allocation_file else None
         )
+        self.odds_file = Path(odds_file) if odds_file else None
 
     def get_teams(self) -> list[Team]:
         teams: list[Team] = []
@@ -103,3 +118,23 @@ class FileDataProvider(DataProvider):
         if not self.thirds_allocation_file or not self.thirds_allocation_file.exists():
             return {}
         return json.loads(self.thirds_allocation_file.read_text())
+
+    def get_odds(self) -> dict[str, Odds1X2]:
+        """Optional per-match de-vigged 1X2 odds keyed by match_id; {} if not supplied.
+
+        Reads ``odds.csv`` (``match_id,odds_home,odds_draw,odds_away``, raw decimal odds —
+        auditable, de-vigged at load). Rows are optional per match; a match absent here falls
+        back to the Elo predictor in ``MarketOddsPredictor``.
+        """
+        if not self.odds_file or not self.odds_file.exists():
+            return {}
+        odds: dict[str, Odds1X2] = {}
+        with self.odds_file.open(newline="") as fh:
+            for row in csv.DictReader(fh):
+                mid = (row.get("match_id") or "").strip()
+                if not mid:
+                    continue
+                odds[mid] = _devig_proportional(
+                    float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
+                )
+        return odds

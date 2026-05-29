@@ -47,6 +47,33 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
         assert section in html
 
 
+def test_market_odds_third_tip_in_report(tmp_path, small_cfg):
+    # With a market_odds predictor + an odds file, the report shows a third "Market-odds tip"
+    # per fixture that has genuine odds (and only those).
+    odds_csv = tmp_path / "odds.csv"
+    odds_csv.write_text(
+        "match_id,odds_home,odds_draw,odds_away\n"
+        "G_A_1,1.5,4.0,6.0\n"   # has odds -> third tip rendered
+        "G_A_2,2.1,3.3,3.4\n"
+    )
+    cfg = dataclasses.replace(
+        small_cfg,
+        predictor=dataclasses.replace(
+            small_cfg.predictor, name="market_odds",
+            params={"total_goals": 2.6, "gmax": 7, "ko_goal_scale": 1.0,
+                    "fallback_params": dict(small_cfg.predictor.params)},
+        ),
+        report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path)),
+    )
+    bundle = dataclasses.replace(BUNDLE, odds_file=odds_csv)
+    result = run_pipeline(cfg, bundle, simulate=False)
+    path = write_report(cfg, result["context"])
+    html = Path(path).read_text()
+    assert "Market-odds tip" in html
+    # Still 72 tips (the recommended tip uses the market path where odds exist, Elo elsewhere).
+    assert len(result["tipset"].tips) == 72
+
+
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg

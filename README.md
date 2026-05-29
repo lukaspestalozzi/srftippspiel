@@ -86,13 +86,14 @@ World Champion bonus = 50 points.
 | `fixtures.csv` | all matches. Group rows use concrete teams; knockout rows use concrete teams for a completed event, else structured references — `W:A`/`R:B` (group winner/runner-up), `3RD:74:ABCDF` (a best-third filling slot 74 from the listed groups), `WIN:M101`/`LOSE:M101` (winner/loser of a match). The bracket is derived from these. |
 | `results.csv` | played matches (append rows as the tournament runs; full for a completed event) |
 | `thirds_allocation.json` | *optional* — explicit third-place combination→slot table (FIFA "Annex C"); absent ⇒ constraint-respecting bipartite fallback |
+| `odds.csv` | *optional* — pre-match bookmaker 1X2 odds: `match_id, odds_home, odds_draw, odds_away` (raw decimal odds, de-vigged at load). Feeds the market-odds predictor and the report's per-fixture **Market-odds tip**. Rows are per-match optional; a missing match falls back to Elo. |
 
 The tournament's display name, `completed` flag, data folder, Elo source and `bonus_questions`
 live in its **config file** (`config.yaml` / `configs/<name>.yaml`), not in the data folder.
 
 `data/eloratings_adapter.py` converts an eloratings.net `World.tsv` export into
-`teams.csv`. Elo ratings change after every international match — refresh `teams.csv`
-shortly before kickoff (11 June 2026).
+`teams.csv`; `data/odds_adapter.py` converts a raw bookmaker 1X2 export into `odds.csv`. Elo
+ratings and odds change over time — refresh both shortly before kickoff (11 June 2026).
 
 ### ⚠️ Known data risks (best-effort snapshot, May 2026)
 
@@ -118,10 +119,12 @@ Türkiye, DR Congo, Iraq) are confirmed.
 ## Accuracy note
 
 The Elo-Poisson model is a reasonable forecaster but **will not systematically out-predict
-the betting market**. A market-odds predictor (Phase 3, stubbed) would be the
-higher-accuracy option. This tool's edge over casual pool participants is **correct
-probability-to-scoreline optimisation** and **simulating the bracket for the champion
-bonus**, not a superior forecast. Elo ratings are a snapshot and change continuously.
+the betting market**. The **market-odds predictor** (Phase 3) closes that gap where you supply
+an `odds.csv` snapshot: it uses de-vigged bookmaker 1X2 odds for those fixtures and falls back
+to Elo elsewhere, and the report shows its pick as a per-fixture **Market-odds tip**. This
+tool's edge over casual pool participants is **correct probability-to-scoreline optimisation**
+and **simulating the bracket for the champion bonus**. Elo ratings and odds are snapshots and
+change continuously.
 
 ## Architecture
 
@@ -129,7 +132,9 @@ A pipeline with two designed-for-extension seams:
 
 - **`Predictor`** (`predictors/`) — match → scoreline distribution. Ships
   `EloPoissonPredictor` (multiplicative goal rates, optional Dixon-Coles low-score
-  correction). Host-venue advantage is configurable (`host_elo_bonus`, default 0).
+  correction; host-venue advantage configurable via `host_elo_bonus`, default 0) and
+  `MarketOddsPredictor` (de-vigged bookmaker 1X2 odds expanded to a scoreline where an
+  `odds.csv` snapshot supplies them, Elo fallback otherwise).
 - **`TipStrategy`** (`strategy/`) — the whole slate of predictions + tournament outcome →
   a complete set of tips. Ships `ExpectedPointsStrategy` (maximise own expected points) and
   `RankOptimizingStrategy` (maximise the probability of *winning* the pool — see below).
@@ -150,11 +155,13 @@ top_n: 1, expert_fraction: 0.6, temperature: 1.5 } }`; the default strategy rema
 probability, expected points, and the contrarian deviations). The field model is derived from
 the predictor (no real pool-tip data exists) and is a documented assumption.
 
-### Phase 3 (partially implemented)
+### Phase 3 (implemented)
 
-`RankOptimizingStrategy` and `FieldModel` are implemented (above). `MarketOddsPredictor` remains
-an abstract/`NotImplementedError` stub; its interface already accommodates Phase 3 without
-refactoring.
+`RankOptimizingStrategy` + `FieldModel` (above) and `MarketOddsPredictor` are implemented.
+Activate the market predictor per tournament with `predictor: { name: market_odds, params: {
+total_goals: 2.6, gmax: 7, ko_goal_scale: 1.0, fallback_params: { ... Elo params ... } } }` and
+`tournament.odds_file: odds.csv`. Committing sourced pre-tournament odds for the `verify`
+benchmarks then quantifies the calibration/pool-points lift over the Elo baseline.
 
 ## Testing
 

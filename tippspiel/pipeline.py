@@ -5,28 +5,37 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .config import Config, TournamentBundle
+from .data.base import Odds1X2
 from .data.file_provider import FileDataProvider
 from .model.types import Match, MatchPrediction, Result, Team, TournamentOutcome
 from .predictors.base import Predictor
 from .predictors.elo_poisson import EloPoissonPredictor
+from .predictors.market_odds import MarketOddsPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
 from .strategy.base import TipStrategy
 from .strategy.bonus import build_bonus_questions
-from .strategy.expected_points import ExpectedPointsStrategy, expected_points
+from .strategy.expected_points import ExpectedPointsStrategy, best_tip, expected_points
 
 CAVEATS = (
     "The Elo-Poisson model is a reasonable forecaster but will not systematically "
-    "out-predict the betting market; a market-odds predictor (Phase 3) would be the "
-    "higher-accuracy option. This tool's edge over casual pool participants is correct "
-    "probability-to-scoreline optimisation and bracket simulation for the champion bonus, "
-    "not a superior forecast. Elo ratings are a snapshot and change after every match."
+    "out-predict the betting market. When an odds.csv snapshot is supplied the market-odds "
+    "predictor uses de-vigged bookmaker odds for those fixtures (falling back to Elo "
+    "elsewhere), which is the higher-accuracy option; the per-fixture \"Market-odds tip\" "
+    "shows that path's scoreline. This tool's edge over casual pool participants is correct "
+    "probability-to-scoreline optimisation and bracket simulation for the champion bonus. "
+    "Elo ratings and odds are snapshots and change over time."
 )
 
 
-def build_predictor(cfg: Config) -> Predictor:
+def build_predictor(cfg: Config, odds: dict[str, Odds1X2] | None = None) -> Predictor:
     if cfg.predictor.name == "elo_poisson":
         return EloPoissonPredictor(**cfg.predictor.params)
+    if cfg.predictor.name == "market_odds":
+        params = dict(cfg.predictor.params)
+        fallback_params = params.pop("fallback_params", {})
+        fallback = EloPoissonPredictor(**fallback_params)
+        return MarketOddsPredictor(odds=odds, fallback=fallback, **params)
     raise ValueError(f"Unknown predictor: {cfg.predictor.name}")
 
 
@@ -79,13 +88,15 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
         bundle.fixtures_file,
         bundle.results_file,
         bundle.thirds_allocation_file,
+        bundle.odds_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
     played = set(results)
+    odds = provider.get_odds()
 
-    predictor = build_predictor(cfg)
+    predictor = build_predictor(cfg, odds=odds)
     strategy = build_strategy(cfg, bundle)
 
     outcome: TournamentOutcome | None = None
@@ -106,12 +117,45 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
 
     predictions = _predict_tippable(fixtures, teams, played, predictor)
     tipset = strategy.generate_tips(predictions, outcome, fixtures)
+    market_predictions = _market_predictions(cfg, fixtures, teams, played, odds)
 
     return {
         "teams": teams, "fixtures": fixtures, "results": results,
         "predictions": predictions, "tipset": tipset, "outcome": outcome,
-        "predictor": predictor,
+        "predictor": predictor, "market_predictions": market_predictions,
     }
+
+
+def _market_predictions(
+    cfg: Config,
+    fixtures: list[Match],
+    teams: dict[str, Team],
+    played: set[str],
+    odds: dict[str, Odds1X2],
+) -> dict[str, MatchPrediction]:
+    """Market-odds scoreline predictions for the report's third per-fixture tip.
+
+    Runs a dedicated ``MarketOddsPredictor`` *regardless of the configured predictor*, but only
+    for tippable fixtures that have genuine odds — so the third tip is a real market prediction,
+    not a silent Elo fallback duplicating the recommended/naive tips. Empty when no odds exist.
+    """
+    if not odds:
+        return {}
+    p = cfg.predictor.params if cfg.predictor.name == "market_odds" else {}
+    gmax = int(p.get("gmax", 7))
+    predictor = MarketOddsPredictor(
+        odds=odds,
+        fallback=EloPoissonPredictor(gmax=gmax),
+        total_goals=p.get("total_goals", 2.6),
+        gmax=gmax,
+        ko_goal_scale=p.get("ko_goal_scale", 1.0),
+    )
+    preds: dict[str, MatchPrediction] = {}
+    for m in fixtures:
+        if m.match_id in played or not m.participants_known or m.match_id not in odds:
+            continue
+        preds[m.match_id] = predictor.predict(m, teams)
+    return preds
 
 
 def run_pipeline(
@@ -124,6 +168,7 @@ def run_pipeline(
     context = _build_report_context(
         cfg, bundle, core["teams"], core["fixtures"], core["results"],
         core["predictions"], core["tipset"], core["outcome"], core["predictor"],
+        core["market_predictions"],
     )
     return {"context": context, "tipset": core["tipset"], "outcome": core["outcome"]}
 
@@ -147,11 +192,12 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
 
     provider = FileDataProvider(
         bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+        odds_file=bundle.odds_file,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
-    predictor = build_predictor(cfg)
+    predictor = build_predictor(cfg, odds=provider.get_odds())
     markdown, data = build_verification(bundle, teams, fixtures, results, predictor)
     paths = VerificationWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
@@ -203,12 +249,16 @@ def _strategy_comparison(cfg, predictions, fixtures):
 
 
 def _build_report_context(
-    cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor
+    cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor,
+    market_predictions=None,
 ) -> dict:
+    market_predictions = market_predictions or {}
     strategy_comparison, compare_map = _strategy_comparison(cfg, predictions, fixtures)
-    groups = _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map)
+    groups = _group_sections(
+        teams, fixtures, results, predictions, tipset, outcome, compare_map, market_predictions
+    )
     knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, compare_map
+        teams, fixtures, results, predictions, tipset, outcome, compare_map, market_predictions
     )
 
     title_odds_chart = None
@@ -245,12 +295,15 @@ def _build_report_context(
     }
 
 
-def _fixture_block(m, teams, results, predictions, tipset, weight, compare_map=None) -> dict:
+def _fixture_block(
+    m, teams, results, predictions, tipset, weight, compare_map=None, market_predictions=None
+) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "compare": None, "ldw_chart": None, "heatmap": None}
+             "tip": None, "naive": None, "market_tip": None, "compare": None,
+             "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
@@ -269,12 +322,21 @@ def _fixture_block(m, teams, results, predictions, tipset, weight, compare_map=N
         nh, na, _ = dist.most_likely_scorelines(1)[0]
         block["naive"] = {"home": nh, "away": na,
                           "ev": expected_points(dist, nh, na, weight)}
+    # Third tip: the market-odds predictor's EV-maximising scoreline, shown only where genuine
+    # bookmaker odds exist (otherwise it would just duplicate the Elo-based recommended tip).
+    market_pred = (market_predictions or {}).get(m.match_id)
+    if market_pred is not None:
+        mdist = market_pred.scoreline
+        mh, ma, _ = best_tip(mdist, weight)
+        block["market_tip"] = {"home": mh, "away": ma,
+                               "ev": expected_points(mdist, mh, ma, weight)}
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
     block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
     return block
 
 
-def _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
+def _group_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None,
+                    market_predictions=None) -> list[dict]:
     by_group: dict[str, list[Match]] = {}
     for m in fixtures:
         if m.group:
@@ -282,7 +344,8 @@ def _group_sections(teams, fixtures, results, predictions, tipset, outcome, comp
     sections = []
     for letter in sorted(by_group):
         ms = sorted(by_group[letter], key=lambda m: m.kickoff)
-        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1, compare_map) for m in ms]
+        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1, compare_map,
+                                 market_predictions) for m in ms]
         adv_chart = None
         if outcome is not None:
             adv_chart = _advancement_chart(letter, ms, teams, outcome)
@@ -308,13 +371,15 @@ def _advancement_chart(letter, group_matches, teams, outcome):
     return charts.advancement_stacked_bar(letter, rows)
 
 
-def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None) -> list[dict]:
+def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome, compare_map=None,
+                       market_predictions=None) -> list[dict]:
     blocks = []
     for m in fixtures:
         if m.group is not None:  # group matches handled elsewhere
             continue
         if m.participants_known or m.match_id in results:
-            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2, compare_map))
+            blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2, compare_map,
+                                         market_predictions))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,
