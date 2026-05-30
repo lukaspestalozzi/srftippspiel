@@ -14,7 +14,12 @@ from .predictors.market_odds import MarketOddsPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
 from .strategy.bonus import build_bonus_questions
-from .strategy.expected_points import ExpectedPointsStrategy, best_tip, expected_points
+from .strategy.expected_points import (
+    ExpectedPointsStrategy,
+    best_tip,
+    ev_components,
+    expected_points,
+)
 
 CAVEATS = (
     "The Elo-Poisson model is a reasonable forecaster but will not systematically "
@@ -208,6 +213,7 @@ def _build_report_context(
     market = {
         "preds": market_predictions,
         "odds_ids": set(odds or {}),
+        "odds": odds or {},
     }
     groups = _group_sections(
         teams, fixtures, results, predictions, tipset, outcome, market
@@ -255,7 +261,7 @@ def _fixture_block(
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "market_tip": None,
+             "tip": None, "naive": None, "market_tip": None, "data": None,
              "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
@@ -274,9 +280,42 @@ def _fixture_block(
         block["naive"] = {"home": nh, "away": na,
                           "ev": expected_points(dist, nh, na, weight)}
     _set_market_tips(block, m, weight, market)
+    rec = (rec_h, rec_a) if tip is not None else None
+    block["data"] = _fixture_data(m, teams, dist, rec, weight, market)
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
     block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
     return block
+
+
+def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
+    """The underlying prediction numbers surfaced in the per-fixture data table — the same
+    payload ``diagnostics._fixture_records`` assembles, so a reader can see *why* a tip wins
+    (Elo, exact L/D/W, top scorelines, the EV breakdown, expected goals, de-vigged market odds).
+    """
+    e_home, e_away = dist.expected_goals()
+    data = {
+        "ldw": {"home": dist.p_home_win(), "draw": dist.p_draw(), "away": dist.p_away_win()},
+        "exp_goals": {"home": e_home, "away": e_away, "total": e_home + e_away},
+        "top3": [(h, a, p) for h, a, p in dist.most_likely_scorelines(3)],
+        "elo": None,
+        "rec_components": None,
+        "rec_cell_prob": None,
+        "market_probs": None,
+    }
+    # Elo only when both sides are concrete teams (knockout slots may be placeholders).
+    if m.home.is_concrete and m.away.is_concrete:
+        eh, ea = teams[m.home.team_id].elo, teams[m.away.team_id].elo
+        data["elo"] = {"home": eh, "away": ea, "diff": eh - ea}
+    if rec is not None:
+        rec_h, rec_a = rec
+        data["rec_components"] = ev_components(dist, rec_h, rec_a, weight)
+        data["rec_cell_prob"] = dist.cell(rec_h, rec_a)
+    # De-vigged bookmaker 1X2, only for fixtures backed by genuine odds (same gate as the tip).
+    odds = (market or {}).get("odds", {})
+    if m.match_id in odds:
+        o = odds[m.match_id]
+        data["market_probs"] = {"home": o.p_home, "draw": o.p_draw, "away": o.p_away}
+    return data
 
 
 def _set_market_tips(block, m, weight, market) -> None:

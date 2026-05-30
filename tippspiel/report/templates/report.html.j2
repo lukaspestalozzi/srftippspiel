@@ -1,3 +1,15 @@
+{% macro fixture_data(d) %}
+<div class="fixture-data">
+  <table class="kv">
+    <tr><th>Model L/D/W</th><td>{{ "%.1f"|format(d.ldw.home*100) }}% / {{ "%.1f"|format(d.ldw.draw*100) }}% / {{ "%.1f"|format(d.ldw.away*100) }}%</td></tr>
+    <tr><th>Expected goals</th><td>{{ "%.2f"|format(d.exp_goals.home) }}–{{ "%.2f"|format(d.exp_goals.away) }} <span class="sub">(total {{ "%.2f"|format(d.exp_goals.total) }})</span></td></tr>
+    {% if d.elo %}<tr><th>Elo</th><td>{{ "%.0f"|format(d.elo.home) }} vs {{ "%.0f"|format(d.elo.away) }} <span class="sub">(Δ {{ "%+.0f"|format(d.elo.diff) }})</span></td></tr>{% endif %}
+    <tr><th>Top scorelines</th><td>{% for h, a, p in d.top3 %}{{ h }}–{{ a }} ({{ "%.1f"|format(p*100) }}%){% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+    {% if d.rec_components %}<tr><th>Why this tip</th><td>tendency {{ "%.2f"|format(d.rec_components.tendency) }} + home {{ "%.2f"|format(d.rec_components.home_goals) }} + away {{ "%.2f"|format(d.rec_components.away_goals) }} + diff {{ "%.2f"|format(d.rec_components.goal_diff) }} = <b>{{ "%.2f"|format(d.rec_components.total) }}</b> <span class="sub">· P(exact tip) {{ "%.1f"|format(d.rec_cell_prob*100) }}%</span></td></tr>{% endif %}
+    {% if d.market_probs %}<tr><th>Market (de-vigged)</th><td>{{ "%.1f"|format(d.market_probs.home*100) }}% / {{ "%.1f"|format(d.market_probs.draw*100) }}% / {{ "%.1f"|format(d.market_probs.away*100) }}%</td></tr>{% endif %}
+  </table>
+</div>
+{% endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -37,6 +49,9 @@
   table.kv { border-collapse:collapse; font-size:.9rem; }
   table.kv td { padding:2px 10px 2px 0; }
   table.kv th { padding:2px 10px 2px 0; text-align:left; color:var(--muted); font-weight:600; }
+  .fixture-data { margin:10px 0 4px; font-size:.85rem; }
+  .fixture-data table.kv th { white-space:nowrap; vertical-align:top; }
+  .fixture-data .sub { color:var(--muted); }
   .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
   @media (max-width:760px){ .grid2 { grid-template-columns: 1fr; } }
   footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line);
@@ -97,6 +112,7 @@
               {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
             </div>
             {% endif %}
+            {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
             <div class="grid2">
               <div>{{ fx.ldw_chart | safe }}</div>
               <div>{{ fx.heatmap | safe }}</div>
@@ -127,6 +143,7 @@
           <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
             <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>
             {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}</div>
+          {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
           <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
         {% else %}
           <p class="meta">{{ fx.slot_note }}</p>
