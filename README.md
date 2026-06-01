@@ -108,8 +108,7 @@ relying on exact output**:
   constraint-respecting bipartite matching** (`simulation/bracket.py`) — a documented
   approximation. Drop in a `thirds_allocation.json` sidecar (and point `thirds_allocation_file`
   at it in the config) from the official table to override it.
-- **Elo ratings** are from an eloratings.net mirror (snapshot ~25 May 2026). Panama,
-  Czechia and Canada Elo values are estimates pending verification.
+- **Elo ratings** are from an eloratings.net mirror (snapshot ~31 May 2026).
 - **Kickoff times** are converted from a published UK-time schedule; exact minutes and a
   few matchday-3 pairings are best-effort. Dates and host venues are confirmed.
 
