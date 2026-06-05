@@ -75,6 +75,26 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     assert len(result["tipset"].tips) == 72
 
 
+def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
+    # The pool report surfaces each team's att/def + goal-volume effect when the predictor
+    # actually uses them (alpha>0), and hides the row entirely when alpha=0.
+    on = dataclasses.replace(
+        small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
+    )
+    html_on = Path(write_report(on, run_pipeline(on, BUNDLE, simulate=False)["context"])).read_text()
+    assert "Attack / defence" in html_on
+    assert "goal-volume layer" in html_on  # the one-time legend
+
+    off = dataclasses.replace(
+        on, predictor=dataclasses.replace(on.predictor, params={**on.predictor.params, "alpha": 0.0})
+    )
+    ctx_off = run_pipeline(off, BUNDLE, simulate=False)["context"]
+    html_off = Path(write_report(off, ctx_off)).read_text()
+    assert "Attack / defence" not in html_off
+    assert "goal-volume layer" not in html_off
+    assert all(f["data"]["offdef"] is None for f in ctx_off["group_fixtures"] if f["data"])
+
+
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg
@@ -99,12 +119,18 @@ def test_fixture_block_carries_underlying_data(small_cfg):
     assert tipped, "expected at least one tipped group fixture with data"
     for f in tipped:
         d = f["data"]
-        assert {"ldw", "exp_goals", "top3", "elo", "rec_components", "rec_cell_prob"} <= set(d)
+        assert {"ldw", "exp_goals", "top3", "elo", "offdef", "rec_components",
+                "rec_cell_prob"} <= set(d)
         # L/D/W is a partition; EV components sum to the recommended (displayed) EV.
         assert d["ldw"]["home"] + d["ldw"]["draw"] + d["ldw"]["away"] == pytest.approx(1.0)
         assert d["rec_components"]["total"] == pytest.approx(f["tip"]["ev"])
         # Group fixtures have concrete teams -> Elo populated.
         assert d["elo"] is not None
+        # config.yaml fits off/def + sets alpha>0, so att/def are surfaced per fixture.
+        assert d["offdef"] is not None
+        assert {"home_name", "att_home", "def_home", "att_away", "def_away", "pct"} <= set(
+            d["offdef"]
+        )
         # Market probs appear only for odds-backed fixtures; when present they are a de-vigged
         # 1X2 partition.
         if d["market_probs"] is not None:

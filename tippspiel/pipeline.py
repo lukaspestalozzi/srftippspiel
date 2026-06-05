@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 from .config import Config, TournamentBundle
@@ -304,12 +305,14 @@ def _build_report_context(
         "odds_ids": set(odds or {}),
         "odds": odds or {},
     }
+    # Off/def goal-volume weight of the active predictor; gates the per-fixture att/def display.
+    alpha = float(getattr(predictor, "alpha", 0.0))
     group_fixtures = _group_fixture_blocks(
-        teams, fixtures, results, predictions, tipset, market
+        teams, fixtures, results, predictions, tipset, market, alpha
     )
     advancement = _advancement_sections(teams, fixtures, outcome)
     knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, market
+        teams, fixtures, results, predictions, tipset, outcome, market, alpha
     )
 
     title_odds_chart = None
@@ -332,6 +335,7 @@ def _build_report_context(
         "mc_iterations": outcome.mc_iterations if outcome else None,
         "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),
+        "uses_offdef": alpha > 0,
     }
     return {
         "header": header,
@@ -346,7 +350,7 @@ def _build_report_context(
 
 
 def _fixture_block(
-    m, teams, results, predictions, tipset, weight, market=None
+    m, teams, results, predictions, tipset, weight, market=None, alpha=0.0
 ) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
@@ -372,16 +376,17 @@ def _fixture_block(
                           "ev": expected_points(dist, nh, na, weight)}
     _set_market_tips(block, m, weight, market)
     rec = (rec_h, rec_a) if tip is not None else None
-    block["data"] = _fixture_data(m, teams, dist, rec, weight, market)
+    block["data"] = _fixture_data(m, teams, dist, rec, weight, market, alpha)
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
     block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
     return block
 
 
-def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
+def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
     """The underlying prediction numbers surfaced in the per-fixture data table — the same
     payload ``diagnostics._fixture_records`` assembles, so a reader can see *why* a tip wins
-    (Elo, exact L/D/W, top scorelines, the EV breakdown, expected goals, de-vigged market odds).
+    (Elo, off/def ratings, exact L/D/W, top scorelines, the EV breakdown, expected goals,
+    de-vigged market odds).
     """
     e_home, e_away = dist.expected_goals()
     data = {
@@ -389,14 +394,26 @@ def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
         "exp_goals": {"home": e_home, "away": e_away, "total": e_home + e_away},
         "top3": [(h, a, p) for h, a, p in dist.most_likely_scorelines(3)],
         "elo": None,
+        "offdef": None,
         "rec_components": None,
         "rec_cell_prob": None,
         "market_probs": None,
     }
-    # Elo only when both sides are concrete teams (knockout slots may be placeholders).
+    # Elo + off/def only when both sides are concrete teams (knockout slots may be placeholders).
     if m.home.is_concrete and m.away.is_concrete:
-        eh, ea = teams[m.home.team_id].elo, teams[m.away.team_id].elo
-        data["elo"] = {"home": eh, "away": ea, "diff": eh - ea}
+        th, ta = teams[m.home.team_id], teams[m.away.team_id]
+        data["elo"] = {"home": th.elo, "away": ta.elo, "diff": th.elo - ta.elo}
+        # Show the att/def ratings the model is actually using (only when alpha>0 and the teams
+        # carry fitted ratings), with the net goal-volume effect this matchup gets vs pure Elo.
+        if alpha and (th.att_elo or th.def_elo or ta.att_elo or ta.def_elo):
+            raw_vol = ((th.att_elo + ta.att_elo) - (th.def_elo + ta.def_elo)) / 2.0
+            pct = (math.exp(alpha * raw_vol) - 1.0) * 100.0
+            data["offdef"] = {
+                "home_name": th.name, "away_name": ta.name,
+                "att_home": th.att_elo, "def_home": th.def_elo,
+                "att_away": ta.att_elo, "def_away": ta.def_elo,
+                "pct": f"{pct:+.0f}% goals",
+            }
     if rec is not None:
         rec_h, rec_a = rec
         data["rec_components"] = ev_components(dist, rec_h, rec_a, weight)
@@ -424,11 +441,11 @@ def _set_market_tips(block, m, weight, market) -> None:
 
 
 def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
-                          market=None) -> list[dict]:
+                          market=None, alpha=0.0) -> list[dict]:
     """All group-stage fixtures as one globally chronological list (not grouped into per-group
     sections). Each block carries its ``group`` letter, surfaced as a tag in the report."""
     ms = sorted((m for m in fixtures if m.group), key=lambda m: m.kickoff)
-    return [_fixture_block(m, teams, results, predictions, tipset, 1, market) for m in ms]
+    return [_fixture_block(m, teams, results, predictions, tipset, 1, market, alpha) for m in ms]
 
 
 def _advancement_sections(teams, fixtures, outcome) -> list[dict]:
@@ -464,7 +481,7 @@ def _advancement_chart(letter, group_matches, teams, outcome):
 
 
 def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
-                       market=None) -> list[dict]:
+                       market=None, alpha=0.0) -> list[dict]:
     # Emit knockout fixtures in chronological (kickoff) order so the report reads as a timeline.
     # The fixtures file orders them by bracket position (M73..M104), which is not by date.
     ko_matches = sorted((m for m in fixtures if m.group is None), key=lambda m: m.kickoff)
@@ -472,7 +489,7 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
     for m in ko_matches:
         if m.participants_known or m.match_id in results:
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
-                                         market))
+                                         market, alpha))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,
