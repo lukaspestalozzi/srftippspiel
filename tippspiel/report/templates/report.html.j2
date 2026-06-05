@@ -136,7 +136,7 @@
         <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
         </span>
-        <span class="summary-right">{% if fx.tip %}tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %}participants TBD{% endif %}</span>
+        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %} · participants TBD{% endif %}</span>
       </summary>
       <div class="fixture-body">
         {% if fx.tip %}

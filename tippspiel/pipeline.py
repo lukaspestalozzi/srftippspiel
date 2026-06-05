@@ -370,16 +370,18 @@ def _advancement_chart(letter, group_matches, teams, outcome):
 
 def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
                        market=None) -> list[dict]:
+    # Emit knockout fixtures in chronological (kickoff) order so the report reads as a timeline.
+    # The fixtures file orders them by bracket position (M73..M104), which is not by date.
+    ko_matches = sorted((m for m in fixtures if m.group is None), key=lambda m: m.kickoff)
     blocks = []
-    for m in fixtures:
-        if m.group is not None:  # group matches handled elsewhere
-            continue
+    for m in ko_matches:
         if m.participants_known or m.match_id in results:
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
                                          market))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,
+                           "kickoff": m.kickoff,
                            "home": m.home.placeholder, "away": m.away.placeholder,
                            "played": False, "tip": None, "slot_note": note,
                            "occupants_chart": None})
