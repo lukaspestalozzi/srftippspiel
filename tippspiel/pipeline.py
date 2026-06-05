@@ -307,6 +307,9 @@ def _build_report_context(
     }
     # Off/def goal-volume weight of the active predictor; gates the per-fixture att/def display.
     alpha = float(getattr(predictor, "alpha", 0.0))
+    # The legend is shown only when the rows will actually appear, i.e. alpha>0 AND some team
+    # carries a fitted rating (else `fit-offdef` was never run and every row would be empty).
+    uses_offdef = alpha > 0 and any(t.att_elo or t.def_elo for t in teams.values())
     group_fixtures = _group_fixture_blocks(
         teams, fixtures, results, predictions, tipset, market, alpha
     )
@@ -335,7 +338,7 @@ def _build_report_context(
         "mc_iterations": outcome.mc_iterations if outcome else None,
         "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),
-        "uses_offdef": alpha > 0,
+        "uses_offdef": uses_offdef,
     }
     return {
         "header": header,

@@ -95,6 +95,29 @@ def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
     assert all(f["data"]["offdef"] is None for f in ctx_off["group_fixtures"] if f["data"])
 
 
+def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
+    # alpha>0 but no team has fitted att/def (fit-offdef never run) must NOT show the legend —
+    # otherwise it would promise a per-fixture att/def row that never renders.
+    from tippspiel.data.file_provider import FileDataProvider
+
+    orig = FileDataProvider.get_teams
+    FileDataProvider.get_teams = lambda self: [
+        dataclasses.replace(t, att_elo=0.0, def_elo=0.0) for t in orig(self)
+    ]
+    try:
+        cfg = dataclasses.replace(
+            small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
+        )
+        assert cfg.predictor.params["alpha"] > 0  # guard: the config does enable off/def
+        ctx = run_pipeline(cfg, BUNDLE, simulate=False)["context"]
+    finally:
+        FileDataProvider.get_teams = orig
+    assert ctx["header"]["uses_offdef"] is False
+    html = Path(write_report(cfg, ctx)).read_text()
+    assert "goal-volume layer" not in html
+    assert "Attack / defence" not in html
+
+
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg
