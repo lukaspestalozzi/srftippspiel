@@ -92,7 +92,7 @@
   <h2 id="groups">Group-stage fixtures</h2>
   <p class="meta">All group matches in kickoff order; each is tagged with its group.</p>
   {% for fx in group_fixtures %}
-    <div class="card"><details {% if not fx.played %}open{% endif %}>
+    <div class="card"><details>
       <summary>
         <span><span class="badge">Group {{ fx.group }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
@@ -129,7 +129,7 @@
   {% if knockout_fixtures %}
   <h2 id="knockout">Knockout fixtures</h2>
   {% for fx in knockout_fixtures %}
-    <div class="card"><details {% if fx.tip and not fx.played %}open{% endif %}>
+    <div class="card"><details>
       <summary>
         <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
