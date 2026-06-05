@@ -77,10 +77,8 @@
   <div class="toc">
     <b>Contents</b>
     <ul>
-      <li><a href="#groups">Group-stage fixtures</a>
-        <ul>{% for g in groups %}<li><a href="#group-{{ g.letter }}">Group {{ g.letter }}</a></li>{% endfor %}</ul>
-      </li>
-      {% if groups and groups[0].advancement_chart %}<li><a href="#advancement">Group advancement</a></li>{% endif %}
+      <li><a href="#groups">Group-stage fixtures</a></li>
+      {% if advancement %}<li><a href="#advancement">Group advancement</a></li>{% endif %}
       {% if knockout_fixtures %}<li><a href="#knockout">Knockout fixtures</a></li>{% endif %}
       {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
       {% if bracket_html %}<li><a href="#bracket">Knockout bracket</a></li>{% endif %}
@@ -90,42 +88,40 @@
   </div>
 
   <h2 id="groups">Group-stage fixtures</h2>
-  {% for g in groups %}
-    <h3 id="group-{{ g.letter }}">Group {{ g.letter }}</h3>
-    {% for fx in g.fixtures %}
-      <div class="card"><details {% if not fx.played %}open{% endif %}>
-        <summary>
-          <span>{{ fx.home }} vs {{ fx.away }}
-            {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
-          </span>
-          <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% endif %}</span>
-        </summary>
-        <div class="fixture-body">
-          {% if fx.played %}
-            <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
-          {% else %}
-            {% if fx.tip %}
-            <div class="tipline">
-              Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
-              <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
-              {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
-              {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
-            </div>
-            {% endif %}
-            {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
-            <div class="grid2">
-              <div>{{ fx.ldw_chart | safe }}</div>
-              <div>{{ fx.heatmap | safe }}</div>
-            </div>
+  <p class="meta">All group matches in kickoff order; each is tagged with its group.</p>
+  {% for fx in group_fixtures %}
+    <div class="card"><details {% if not fx.played %}open{% endif %}>
+      <summary>
+        <span><span class="badge">Group {{ fx.group }}</span> {{ fx.home }} vs {{ fx.away }}
+          {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
+        </span>
+        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% endif %}</span>
+      </summary>
+      <div class="fixture-body">
+        {% if fx.played %}
+          <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
+        {% else %}
+          {% if fx.tip %}
+          <div class="tipline">
+            Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
+            <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
+            {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
+            {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
+          </div>
           {% endif %}
-        </div>
-      </details></div>
-    {% endfor %}
+          {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
+          <div class="grid2">
+            <div>{{ fx.ldw_chart | safe }}</div>
+            <div>{{ fx.heatmap | safe }}</div>
+          </div>
+        {% endif %}
+      </div>
+    </details></div>
   {% endfor %}
 
-  {% if groups and groups[0].advancement_chart %}
+  {% if advancement %}
   <h2 id="advancement">Group advancement</h2>
-  {% for g in groups %}{% if g.advancement_chart %}{{ g.advancement_chart | safe }}{% endif %}{% endfor %}
+  {% for a in advancement %}{{ a.advancement_chart | safe }}{% endfor %}
   {% endif %}
 
   {% if knockout_fixtures %}
@@ -136,7 +132,7 @@
         <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
         </span>
-        <span class="summary-right">{% if fx.tip %}tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %}participants TBD{% endif %}</span>
+        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %} · participants TBD{% endif %}</span>
       </summary>
       <div class="fixture-body">
         {% if fx.tip %}

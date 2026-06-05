@@ -95,10 +95,16 @@ live in its **config file** (`config.yaml` / `configs/<name>.yaml`), not in the 
 `teams.csv`; `data/odds_adapter.py` converts a raw bookmaker 1X2 export into `odds.csv`. Elo
 ratings and odds change over time — refresh both shortly before kickoff (11 June 2026).
 
-### ⚠️ Known data risks (best-effort snapshot, May 2026)
+### Data provenance & the one remaining approximation (snapshot, June 2026)
 
-This snapshot was sourced best-effort from public sources and **should be verified before
-relying on exact output**:
+The teams, group draw (A–L), the 6 play-off winners (Czechia, Bosnia, Sweden, Türkiye,
+DR Congo, Iraq) and the **full match schedule** — group *and* knockout dates, UTC kickoff
+times and host countries — are taken per-match from the official post-draw fixture list.
+**Elo ratings** are an eloratings.net snapshot (~5 June 2026) and **odds** an ESPN moneyline
+snapshot (de-vigged at load); both move continuously, so refresh them shortly before kickoff
+(11 June 2026).
+
+One modelling approximation remains:
 
 - **Third-placed → Round-of-32 allocation table.** The official FIFA "Annex C" table
   (mapping each of the 495 combinations of 8 qualifying third-placed groups to bracket
@@ -108,12 +114,6 @@ relying on exact output**:
   constraint-respecting bipartite matching** (`simulation/bracket.py`) — a documented
   approximation. Drop in a `thirds_allocation.json` sidecar (and point `thirds_allocation_file`
   at it in the config) from the official table to override it.
-- **Elo ratings** are from an eloratings.net mirror (snapshot ~31 May 2026).
-- **Kickoff times** are converted from a published UK-time schedule; exact minutes and a
-  few matchday-3 pairings are best-effort. Dates and host venues are confirmed.
-
-The 48 teams, group draw (A–L), and the 6 playoff winners (Czechia, Bosnia, Sweden,
-Türkiye, DR Congo, Iraq) are confirmed.
 
 ## Accuracy note
 
