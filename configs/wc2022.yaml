@@ -22,6 +22,9 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
+strategy:
+  realism_tolerance: 0.15   # realistic tips; 0 = strict EV (see config.yaml)
+
 tournament:
   name: wc2022
   display_name: FIFA World Cup 2022

@@ -73,30 +73,50 @@ def score_tip(th: int, ta: int, actual_h: int, actual_a: int, weight: int) -> in
     return weight * pts
 
 
-def best_tip(dist: ScorelineDistribution, weight: int) -> tuple[int, int, float]:
-    """Enumerate all (th, ta) in [0, gmax]^2, return the EV-maximising tip.
+def best_tip(
+    dist: ScorelineDistribution, weight: int, realism_tolerance: float = 0.0
+) -> tuple[int, int, float]:
+    """Enumerate all (th, ta) in [0, gmax]^2 and return the recommended tip.
 
-    Deterministic tie-break: (1) higher probability of the exact tipped scoreline,
-    then (2) lower total goals th+ta, then (3) lower th.
+    With ``realism_tolerance == 0`` this is the strict EV-maximiser, tie-broken by
+    (1) higher probability of the exact tipped scoreline, then (2) lower total goals, then
+    (3) lower th.
+
+    With ``realism_tolerance > 0`` the tip is chosen among the cells whose EV is within
+    ``realism_tolerance`` pool-points of the maximum, preferring the one **closest to the model's
+    expected scoreline** (L1 distance to ``expected_goals``), then the same EV/probability
+    tie-breaks. Because flipping the win/draw/loss tendency costs ~5 pts (>> a sensible
+    tolerance), the candidate set is always same-tendency/same-margin, so this only nudges the
+    *absolute* goals toward what the model expects — a 1:0 becomes a same-margin 2:1 when the
+    model actually expects goals, at a tiny EV cost, while a genuinely tight game stays low.
     """
-    best: tuple[float, float, int, int] | None = None  # (-EV, -P_exact, th+ta, th)
-    best_th = best_ta = 0
-    best_ev = 0.0
-    for th in range(dist.gmax + 1):
-        for ta in range(dist.gmax + 1):
-            ev = expected_points(dist, th, ta, weight)
-            key = (-ev, -dist.cell(th, ta), th + ta, th)
-            if best is None or key < best:
-                best = key
-                best_th, best_ta, best_ev = th, ta, ev
-    return best_th, best_ta, best_ev
+    gmax = dist.gmax
+    evs = {
+        (th, ta): expected_points(dist, th, ta, weight)
+        for th in range(gmax + 1)
+        for ta in range(gmax + 1)
+    }
+    mx = max(evs.values())
+    e_home, e_away = dist.expected_goals()
+    candidates = [c for c in evs if evs[c] >= mx - realism_tolerance]
+
+    def _key(cell: tuple[int, int]) -> tuple:
+        th, ta = cell
+        # Realism term is inert at tolerance 0 (candidates are then exactly the EV-argmax cells),
+        # so the legacy EV/probability/total/home tie-break is reproduced byte-for-byte.
+        realism = (abs(th - e_home) + abs(ta - e_away)) if realism_tolerance > 0 else 0.0
+        return (realism, -evs[cell], -dist.cell(th, ta), th + ta, th)
+
+    best_th, best_ta = min(candidates, key=_key)
+    return best_th, best_ta, evs[(best_th, best_ta)]
 
 
 class ExpectedPointsStrategy:
     name = "expected_points"
 
-    def __init__(self, bonus_question_configs=()) -> None:
+    def __init__(self, bonus_question_configs=(), realism_tolerance: float = 0.0) -> None:
         self._bonus_configs = list(bonus_question_configs)
+        self._realism_tolerance = realism_tolerance
 
     def generate_tips(
         self,
@@ -111,7 +131,7 @@ class ExpectedPointsStrategy:
             if match is None:
                 continue
             weight = match.stage.points_weight
-            th, ta, ev = best_tip(pred.scoreline, weight)
+            th, ta, ev = best_tip(pred.scoreline, weight, self._realism_tolerance)
             naive = pred.scoreline.most_likely_scorelines(1)[0]
             naive_ev = expected_points(pred.scoreline, naive[0], naive[1], weight)
             rationale = (

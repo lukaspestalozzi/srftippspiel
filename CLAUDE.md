@@ -113,7 +113,8 @@ Workflow: to answer "why does the model do X?", run `diagnose` and read `diagnos
 first; for exact numbers or custom aggregation, read `diagnostic.json`. Example already
 answered by the report: *"why always 1:0 / 0:1?"* → the recommended-tip frequency + EV
 breakdown show the 5-pt tendency term dominates EV at ~1.3 goals/side, so the optimiser
-picks the lowest-total scoreline capturing the dominant tendency.
+picks the lowest-total scoreline capturing the dominant tendency. This shutout bias is now
+**tunably mitigated** by `strategy.realism_tolerance` (see Conventions) without abandoning EV.
 
 ## Architecture map
 
@@ -123,7 +124,8 @@ picks the lowest-total scoreline capturing the dominant tendency.
   (Phase-3): de-vigged bookmaker 1X2 odds expanded to a scoreline (`expansion.py`) where an
   `odds.csv` snapshot supplies them, falling back to Elo for every other (and synthetic) matchup.
 - `tippspiel/strategy/` — `expected_points.py` (`ExpectedPointsStrategy`, the EV optimiser;
-  `ev_components()` is the reusable EV breakdown) and `bonus.py` (bonus questions).
+  `ev_components()` is the reusable EV breakdown; `best_tip()` takes a `realism_tolerance`) and
+  `bonus.py` (bonus questions).
 - `tippspiel/simulation/` — vectorised NumPy `TournamentSimulator` + standings/thirds/bracket.
 - `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report) and
   `diagnostics.py` (my report).
@@ -159,6 +161,14 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - **Bonus questions are exact-match scored** → recommend the **mode** (argmax). The strategy
   bonus loop already does this generically; add a question by subclassing `BonusQuestion`,
   registering it in `_BONUS_REGISTRY`, and listing it in `config.yaml`.
+- **`strategy.realism_tolerance` (config) trades a sliver of EV for realistic tips.** Pure
+  EV-maximisation tips ~89% shutouts (one team scores 0) because the 5-pt tendency + 3-pt
+  goal-diff terms dominate the 1-pt goal terms. `best_tip` instead picks, among scorelines
+  within `realism_tolerance` pool-points of the EV optimum, the one nearest the model's expected
+  scoreline — flipping e.g. 1:0→2:1 (same tendency + margin) when the model expects goals.
+  `0` = legacy strict EV (byte-identical); `~0.15` lifts both-teams-score tips to a realistic
+  ~50%. It only affects pool **points**, never RPS/NLL (those come from the distribution, not the
+  tip), so `tune` (RPS-primary) deliberately excludes it — set it by direct points-cost measurement.
 - **Validation is against reality**: `historical_stats.py` holds sourced figures that drive
   both the top-scorer prior and `tests/test_historical_validation.py`. Update it (with
   sources) rather than hardcoding magic numbers elsewhere.

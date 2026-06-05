@@ -62,7 +62,10 @@ def _evaluate(params: dict, benchmarks: list) -> dict:
     rps_sum = nll_sum = 0.0
     per_tournament: dict[str, dict] = {}
     for bundle, teams, fixtures, results in benchmarks:
-        _md, data = build_verification(bundle, teams, fixtures, results, predictor)
+        # realism_tolerance is fixed at 0 here: it only shifts pool points (never RPS/NLL), so a
+        # swept value would be driven to 0 by the RPS-primary objective. It's set separately.
+        _md, data = build_verification(bundle, teams, fixtures, results, predictor,
+                                       realism_tolerance=0.0)
         s = data["summary"]["all"]
         c = data["calibration"]["all"]
         n += s["matches"]

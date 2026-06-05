@@ -39,6 +39,15 @@ class ReportConfig:
 
 
 @dataclass(frozen=True)
+class StrategyConfig:
+    # EV-tolerance for realistic tip selection: among scorelines within this many pool-points of
+    # the EV-optimum, pick the one closest to the model's expected scoreline. 0 = strict
+    # EV-maximisation (legacy); ~0.15 lifts both-teams-score tips to a realistic rate. See
+    # ``best_tip`` in strategy/expected_points.py.
+    realism_tolerance: float = 0.0
+
+
+@dataclass(frozen=True)
 class BonusQuestionConfig:
     id: str
     points: int
@@ -49,6 +58,7 @@ class Config:
     predictor: PredictorConfig
     simulation: SimulationConfig
     report: ReportConfig
+    strategy: StrategyConfig = StrategyConfig()
     config_path: Path | None = None
 
 
@@ -101,6 +111,7 @@ def load_config(path: str | Path) -> Config:
                 penalty_model=penalty,
             ),
             report=ReportConfig(**raw["report"]),
+            strategy=StrategyConfig(**(raw.get("strategy") or {})),
             config_path=path,
         )
     except KeyError as exc:

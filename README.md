@@ -84,6 +84,14 @@ correction; negative lifts draws over 1:0/0:1), `host_elo_bonus` (applied when a
 its own country), and `ko_goal_scale` (knockout goal-rate multiplier, since knockout results
 are the 120-minute scoreline).
 
+A separate `strategy:` block holds **`realism_tolerance`**. Pure expected-points maximisation
+tips a shutout (one team scores 0) in ~89% of matches — correct for points, but unrealistic,
+since the tendency (5) and goal-diff (3) terms dwarf the per-team goal terms (1+1). With a small
+tolerance, the optimiser picks — among scorelines within that many pool-points of the EV optimum
+— the one closest to the model's expected score, flipping e.g. `1:0`→`2:1` (same winner and
+margin) when the model expects goals. `0` reproduces strict EV; `~0.15` lifts both-teams-score
+tips to a realistic ~50% at a negligible (<2%) points cost.
+
 ## Scoring rules implemented
 
 Exact-scoreline tips. Per group match: tendency 5, home-goal +1, away-goal +1, goal-diff

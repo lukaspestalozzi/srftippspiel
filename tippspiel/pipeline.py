@@ -45,7 +45,10 @@ def build_predictor(cfg: Config, odds: dict[str, Odds1X2] | None = None) -> Pred
 
 
 def build_strategy(cfg: Config, bundle: TournamentBundle) -> ExpectedPointsStrategy:
-    return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
+    return ExpectedPointsStrategy(
+        bonus_question_configs=bundle.bonus_questions,
+        realism_tolerance=cfg.strategy.realism_tolerance,
+    )
 
 
 def _predict_tippable(
@@ -180,7 +183,10 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
     predictor = build_predictor(cfg, odds=provider.get_odds())
-    markdown, data = build_verification(bundle, teams, fixtures, results, predictor)
+    markdown, data = build_verification(
+        bundle, teams, fixtures, results, predictor,
+        realism_tolerance=cfg.strategy.realism_tolerance,
+    )
     paths = VerificationWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
 
@@ -310,12 +316,14 @@ def _build_report_context(
     # The legend is shown only when the rows will actually appear, i.e. alpha>0 AND some team
     # carries a fitted rating (else `fit-offdef` was never run and every row would be empty).
     uses_offdef = alpha > 0 and any(t.att_elo or t.def_elo for t in teams.values())
+    # Realism tolerance keeps the report's market-odds tip consistent with the recommended tip.
+    realism = cfg.strategy.realism_tolerance
     group_fixtures = _group_fixture_blocks(
-        teams, fixtures, results, predictions, tipset, market, alpha
+        teams, fixtures, results, predictions, tipset, market, alpha, realism
     )
     advancement = _advancement_sections(teams, fixtures, outcome)
     knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, market, alpha
+        teams, fixtures, results, predictions, tipset, outcome, market, alpha, realism
     )
 
     title_odds_chart = None
@@ -353,7 +361,7 @@ def _build_report_context(
 
 
 def _fixture_block(
-    m, teams, results, predictions, tipset, weight, market=None, alpha=0.0
+    m, teams, results, predictions, tipset, weight, market=None, alpha=0.0, realism=0.0
 ) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
@@ -377,7 +385,7 @@ def _fixture_block(
         nh, na, _ = dist.most_likely_scorelines(1)[0]
         block["naive"] = {"home": nh, "away": na,
                           "ev": expected_points(dist, nh, na, weight)}
-    _set_market_tips(block, m, weight, market)
+    _set_market_tips(block, m, weight, market, realism)
     rec = (rec_h, rec_a) if tip is not None else None
     block["data"] = _fixture_data(m, teams, dist, rec, weight, market, alpha)
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
@@ -429,7 +437,7 @@ def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
     return data
 
 
-def _set_market_tips(block, m, weight, market) -> None:
+def _set_market_tips(block, m, weight, market, realism=0.0) -> None:
     """Attach the EV-optimal market-odds tip to ``block`` — shown only for fixtures backed by
     genuine bookmaker odds, so it's a real market prediction rather than a silent Elo-fallback
     duplicate of the recommended tip. No-op when the fixture has no odds."""
@@ -439,16 +447,17 @@ def _set_market_tips(block, m, weight, market) -> None:
     if market_pred is None:
         return
     mdist = market_pred.scoreline
-    th, ta, ev = best_tip(mdist, weight)
+    th, ta, ev = best_tip(mdist, weight, realism)
     block["market_tip"] = {"home": th, "away": ta, "ev": ev}
 
 
 def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
-                          market=None, alpha=0.0) -> list[dict]:
+                          market=None, alpha=0.0, realism=0.0) -> list[dict]:
     """All group-stage fixtures as one globally chronological list (not grouped into per-group
     sections). Each block carries its ``group`` letter, surfaced as a tag in the report."""
     ms = sorted((m for m in fixtures if m.group), key=lambda m: m.kickoff)
-    return [_fixture_block(m, teams, results, predictions, tipset, 1, market, alpha) for m in ms]
+    return [_fixture_block(m, teams, results, predictions, tipset, 1, market, alpha, realism)
+            for m in ms]
 
 
 def _advancement_sections(teams, fixtures, outcome) -> list[dict]:
@@ -484,7 +493,7 @@ def _advancement_chart(letter, group_matches, teams, outcome):
 
 
 def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
-                       market=None, alpha=0.0) -> list[dict]:
+                       market=None, alpha=0.0, realism=0.0) -> list[dict]:
     # Emit knockout fixtures in chronological (kickoff) order so the report reads as a timeline.
     # The fixtures file orders them by bracket position (M73..M104), which is not by date.
     ko_matches = sorted((m for m in fixtures if m.group is None), key=lambda m: m.kickoff)
@@ -492,7 +501,7 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
     for m in ko_matches:
         if m.participants_known or m.match_id in results:
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
-                                         market, alpha))
+                                         market, alpha, realism))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,

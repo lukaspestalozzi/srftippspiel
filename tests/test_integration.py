@@ -118,6 +118,37 @@ def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
     assert "Attack / defence" not in html
 
 
+def test_realism_tolerance_raises_both_score_share(small_cfg):
+    # A realism tolerance on the EV optimiser lifts the share of tips where BOTH teams score
+    # from the ~8% strict-EV rate toward a realistic ~50%.
+    from tippspiel.config import StrategyConfig
+
+    def both_score_share(tol):
+        cfg = dataclasses.replace(small_cfg, strategy=StrategyConfig(realism_tolerance=tol))
+        tips = run_pipeline(cfg, BUNDLE, simulate=False)["tipset"].tips
+        return sum(t.tip_home > 0 and t.tip_away > 0 for t in tips.values()) / len(tips)
+
+    legacy = both_score_share(0.0)
+    realistic = both_score_share(0.15)
+    assert realistic > 0.40             # tolerance reaches a realistic both-teams-score rate
+    assert realistic - legacy >= 0.15   # and clearly lifts it above the strict-EV baseline
+
+
+def test_strategy_config_parses_realism_tolerance(tmp_path):
+    from tippspiel.config import load_config
+
+    base = (
+        "predictor: {name: elo_poisson, params: {}}\n"
+        "simulation: {iterations: 10, seed: 1, penalty_model: coin_flip}\n"
+        "report: {output_dir: out/, display_timezone: UTC}\n"
+    )
+    p = tmp_path / "c.yaml"
+    p.write_text(base)
+    assert load_config(p).strategy.realism_tolerance == 0.0  # omitted -> legacy default
+    p.write_text(base + "strategy: {realism_tolerance: 0.2}\n")
+    assert load_config(p).strategy.realism_tolerance == 0.2
+
+
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg

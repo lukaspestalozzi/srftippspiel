@@ -23,6 +23,9 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
+strategy:
+  realism_tolerance: 0.15   # realistic tips; 0 = strict EV (see config.yaml)
+
 tournament:
   name: euro2020
   display_name: UEFA Euro 2020

@@ -37,6 +37,12 @@ report:
   output_dir: output/
   display_timezone: Europe/Zurich
 
+strategy:
+  # Realistic tips: among scorelines within this many pool-points of the EV optimum, pick the
+  # one nearest the model's expected score. 0 = strict EV (~8% both-teams-score, ~89% shutouts);
+  # 0.15 lifts both-teams-score tips to a realistic ~50% at a negligible (~1.5%) points cost.
+  realism_tolerance: 0.15
+
 tournament:
   name: wc2026
   display_name: FIFA World Cup 2026
