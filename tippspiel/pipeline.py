@@ -215,9 +215,10 @@ def _build_report_context(
         "odds_ids": set(odds or {}),
         "odds": odds or {},
     }
-    groups = _group_sections(
-        teams, fixtures, results, predictions, tipset, outcome, market
+    group_fixtures = _group_fixture_blocks(
+        teams, fixtures, results, predictions, tipset, market
     )
+    advancement = _advancement_sections(teams, fixtures, outcome)
     knockout_fixtures = _knockout_sections(
         teams, fixtures, results, predictions, tipset, outcome, market
     )
@@ -245,7 +246,8 @@ def _build_report_context(
     }
     return {
         "header": header,
-        "groups": groups,
+        "group_fixtures": group_fixtures,
+        "advancement": advancement,
         "knockout_fixtures": knockout_fixtures,
         "title_odds_chart": title_odds_chart,
         "bracket_html": bracket_html,
@@ -260,8 +262,8 @@ def _fixture_block(
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
-             "stage": m.stage.value, "played": m.match_id in results, "result": None,
-             "tip": None, "naive": None, "market_tip": None, "data": None,
+             "stage": m.stage.value, "group": m.group, "played": m.match_id in results,
+             "result": None, "tip": None, "naive": None, "market_tip": None, "data": None,
              "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
@@ -332,22 +334,26 @@ def _set_market_tips(block, m, weight, market) -> None:
     block["market_tip"] = {"home": th, "away": ta, "ev": ev}
 
 
-def _group_sections(teams, fixtures, results, predictions, tipset, outcome,
-                    market=None) -> list[dict]:
+def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
+                          market=None) -> list[dict]:
+    """All group-stage fixtures as one globally chronological list (not grouped into per-group
+    sections). Each block carries its ``group`` letter, surfaced as a tag in the report."""
+    ms = sorted((m for m in fixtures if m.group), key=lambda m: m.kickoff)
+    return [_fixture_block(m, teams, results, predictions, tipset, 1, market) for m in ms]
+
+
+def _advancement_sections(teams, fixtures, outcome) -> list[dict]:
+    """Per-group advancement charts — the one place the report still groups by group, since the
+    chart is inherently a per-group standings view. Empty when there is no simulation."""
+    if outcome is None:
+        return []
     by_group: dict[str, list[Match]] = {}
     for m in fixtures:
         if m.group:
             by_group.setdefault(m.group, []).append(m)
-    sections = []
-    for letter in sorted(by_group):
-        ms = sorted(by_group[letter], key=lambda m: m.kickoff)
-        blocks = [_fixture_block(m, teams, results, predictions, tipset, 1,
-                                 market) for m in ms]
-        adv_chart = None
-        if outcome is not None:
-            adv_chart = _advancement_chart(letter, ms, teams, outcome)
-        sections.append({"letter": letter, "fixtures": blocks, "advancement_chart": adv_chart})
-    return sections
+    return [{"letter": letter,
+             "advancement_chart": _advancement_chart(letter, by_group[letter], teams, outcome)}
+            for letter in sorted(by_group)]
 
 
 def _advancement_chart(letter, group_matches, teams, outcome):

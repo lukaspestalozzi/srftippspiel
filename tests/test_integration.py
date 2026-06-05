@@ -94,7 +94,7 @@ def test_fixture_block_carries_underlying_data(small_cfg):
     # Every tippable fixture exposes the underlying prediction numbers used in the report's
     # data table; the EV breakdown must reconstruct the recommended tip's EV exactly.
     result = run_pipeline(small_cfg, BUNDLE, simulate=False)
-    fixtures = [f for g in result["context"]["groups"] for f in g["fixtures"]]
+    fixtures = result["context"]["group_fixtures"]
     tipped = [f for f in fixtures if f["data"] and f["tip"]]
     assert tipped, "expected at least one tipped group fixture with data"
     for f in tipped:
