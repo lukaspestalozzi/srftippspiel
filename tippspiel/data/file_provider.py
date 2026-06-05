@@ -18,6 +18,12 @@ from ..model.types import Match, Result, Team, TeamRef
 from .base import DataProvider, Odds1X2
 
 
+def _opt_float(raw: str | None) -> float:
+    """Parse an optional float cell; blank/missing -> 0.0."""
+    s = (raw or "").strip()
+    return float(s) if s else 0.0
+
+
 def _parse_kickoff(raw: str) -> datetime:
     s = raw.strip().replace("Z", "+00:00")
     dt = datetime.fromisoformat(s)
@@ -63,12 +69,16 @@ class FileDataProvider(DataProvider):
                 if not row.get("team_id"):
                     continue
                 trend = row.get("elo_trend", "").strip()
+                # att_elo/def_elo are optional (added by `tippspiel fit-offdef`); absent or
+                # blank -> 0.0, which leaves the predictor at its pure-Elo behaviour.
                 teams.append(
                     Team(
                         team_id=row["team_id"].strip(),
                         name=row["name"].strip(),
                         elo=float(row["elo"]),
                         elo_trend=float(trend) if trend else None,
+                        att_elo=_opt_float(row.get("att_elo")),
+                        def_elo=_opt_float(row.get("def_elo")),
                     )
                 )
         return teams

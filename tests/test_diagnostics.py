@@ -42,10 +42,11 @@ def test_markdown_has_all_sections(diag):
     for header in (
         "# Claude Diagnostic Report",
         "## 2. Predictor behaviour",
-        "## 3. Per-fixture detail",
-        "## 4. Simulation diagnostics",
-        "## 5. Bonus-question diagnostics",
-        "## 6. Validation / anomaly summary",
+        "## 3. Offensive / defensive Elo",
+        "## 4. Per-fixture detail",
+        "## 5. Simulation diagnostics",
+        "## 6. Bonus-question diagnostics",
+        "## 7. Validation / anomaly summary",
     ):
         assert header in md
 

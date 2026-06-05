@@ -202,6 +202,95 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
+def write_offdef_snapshot(bundle: TournamentBundle, offdef_block: dict | None = None) -> dict:
+    """Fit offensive/defensive Elo from the historical corpus and persist it to teams.csv.
+
+    Fits ``att_elo``/``def_elo`` for every team in the corpus from all matches **strictly
+    before** the tournament's first kickoff (so a ``verify`` backtest stays leak-free), then
+    writes the subset mapping to this tournament's teams back into its ``teams.csv`` (preserving
+    the existing columns). Returns a small stats dict for the CLI to print.
+    """
+    import csv as _csv
+
+    from .data.historical_results_adapter import (
+        DEFAULT_CORPUS,
+        WeightTiers,
+        corpus_name_for,
+        load_corpus,
+        ratings_for_team,
+    )
+    from .training.offdef_elo import OffDefParams, OffDefRating, fit_off_def
+
+    block = dict(offdef_block or {})
+    params = OffDefParams(
+        mu=float(block.get("mu", OffDefParams.mu)),
+        k_att=float(block.get("k_att", OffDefParams.k_att)),
+        k_def=float(block.get("k_def", OffDefParams.k_def)),
+        gamma_home=float(block.get("gamma_home", OffDefParams.gamma_home)),
+        residual_cap=float(block.get("residual_cap", OffDefParams.residual_cap)),
+        epochs=int(block.get("epochs", OffDefParams.epochs)),
+    )
+    w = block.get("weights", {}) or {}
+    tiers = WeightTiers(
+        friendly=float(w.get("friendly", WeightTiers.friendly)),
+        qualifier=float(w.get("qualifier", WeightTiers.qualifier)),
+        continental=float(w.get("continental", WeightTiers.continental)),
+        world_cup=float(w.get("world_cup", WeightTiers.world_cup)),
+        default=float(w.get("default", WeightTiers.default)),
+    )
+    corpus_path = block.get("corpus_file", DEFAULT_CORPUS)
+
+    provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+    fixtures = provider.get_fixtures()
+    snapshot = block.get("snapshot_date") or min(m.kickoff for m in fixtures).date().isoformat()
+
+    matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers)
+    ratings = fit_off_def(matches, params)
+
+    teams = provider.get_teams()
+    by_id: dict[str, OffDefRating] = {}
+    unmapped: list[str] = []
+    for t in teams:
+        by_id[t.team_id] = ratings_for_team(t.name, ratings)
+        if corpus_name_for(t.name) not in ratings:
+            unmapped.append(t.name)
+
+    _write_teams_csv_with_offdef(bundle.teams_file, by_id, _csv)
+
+    ranked_att = sorted(teams, key=lambda t: by_id[t.team_id].att, reverse=True)
+    ranked_def = sorted(teams, key=lambda t: by_id[t.team_id].def_, reverse=True)
+    return {
+        "snapshot_date": snapshot,
+        "corpus_matches": len(matches),
+        "corpus_teams": len(ratings),
+        "teams_written": len(teams),
+        "unmapped": unmapped,
+        "top_attack": [(t.name, by_id[t.team_id].att) for t in ranked_att[:5]],
+        "top_defence": [(t.name, by_id[t.team_id].def_) for t in ranked_def[:5]],
+    }
+
+
+def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
+    """Rewrite teams.csv with att_elo/def_elo columns appended, preserving existing columns."""
+    with open(teams_file, newline="") as fh:
+        reader = _csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    for col in ("att_elo", "def_elo"):
+        if col not in fieldnames:
+            fieldnames.append(col)
+    for row in rows:
+        tid = (row.get("team_id") or "").strip()
+        r = by_id.get(tid)
+        if r is not None:
+            row["att_elo"] = f"{r.att:.4f}"
+            row["def_elo"] = f"{r.def_:.4f}"
+    with open(teams_file, "w", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor,
     market_predictions=None, odds=None,

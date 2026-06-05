@@ -23,6 +23,7 @@ tippspiel diagnose          # the Claude diagnostic report (see below) -> output
 tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
 tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
 tippspiel tune              # sweep predictor params vs the completed-tournament backtests -> output/tune.{md,json}
+tippspiel fit-offdef        # fit per-team offensive/defensive Elo from history -> teams.csv att_elo/def_elo
 ```
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
@@ -60,13 +61,36 @@ model beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`
 `score_tip` in `strategy/expected_points.py`.
 
 `tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
-`ko_goal_scale`) over the completed-tournament backtests and writes a leaderboard
+`ko_goal_scale`, `alpha`) over the completed-tournament backtests and writes a leaderboard
 (`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
 tie-break on pool-points % of max; it also reports a leave-one-tournament-out generalisation
 check. The current `config.yaml` params are the tuned result. Code: `tippspiel/report/tuning.py`.
 Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
 goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
 advantage applies when a team plays in its own country (`venue_country == home.team_id`).
+
+## Offensive/defensive Elo (goal-volume layer)
+
+A single scalar `Team.elo` fixes the goal **ratio** (who wins) but pins every match's **total**
+goals to `mu`. Per-team `att_elo`/`def_elo` add the missing volume dimension. `tippspiel
+fit-offdef` learns them from the full international match-goal history (Mart Jürisoo's dataset,
+committed at `tippspiel/data/historical/international_results.csv`, 1872–present) with an online,
+Elo-style update on **goals** (`tippspiel/training/offdef_elo.py`): for each match, chronologically,
+`att += k·w·(goals_scored − λ̂)` and `def -= k·w·(goals_conceded − λ̂)` where `λ̂ = (μ/2)·exp(att−def+γ)`
+— i.e. SGD on the Poisson NLL. Matches are FIFA-importance-weighted (`w`: friendly ×0.5, qualifier
+×2.5, continental ×3, World Cup ×4; `tippspiel/data/historical_results_adapter.py`). `fit-offdef`
+snapshots ratings as of the **day before the tournament's first kickoff** (so `verify` stays
+leak-free) and writes the `att_elo,def_elo` columns into that tournament's `teams.csv`; they
+default to 0 when absent. Convention: higher `att_elo` = scores more; higher `def_elo` = concedes
+fewer (stingier). Ratings are zero-centred over the field, so the average matchup still expects `mu`.
+
+The predictor blends them as a **symmetric volume term** weighted by `alpha`:
+`vol = ((att_h+att_a) − (def_h+def_a))/2`, added to *both* sides' log-rate. The Elo tendency term
+`k·Δ` is left at full strength (the scalar Elo calibrates win/draw/loss better than the fitted
+ratings do — backtested), so off/def only moves the goal **total**: two strong attacks → high-scoring,
+two stingy defences → tight. `alpha=0` reproduces the pure-Elo model exactly. Fit hyperparameters
+(`k_att`, `k_def`, `gamma_home`, `epochs`, weight tiers) live in an optional `offdef:` config block;
+`alpha` is in `predictor.params` and is what `tune` optimises.
 
 ## The diagnostic report — my primary analysis tool
 
@@ -79,9 +103,11 @@ whenever a new question recurs (code: `tippspiel/report/diagnostics.py`).
 
 It contains: run/config header; **predictor-behaviour** stats (recommended-tip frequency,
 tendency split, EV-component breakdown, optimal-vs-naive gap, plain-English interpretation
-notes); a **per-fixture table** (L/D/W, top-3 cells, recommended vs naive tip + EV split);
-**simulation diagnostics** (invariants, title odds, group qualification); **bonus
-calibration** vs `historical_stats.py`; and an **automated PASS/WARN/FAIL anomaly block**.
+notes); an **offensive/defensive Elo** section (most attack- vs defence-minded sides, rating
+extremes, att/def-vs-Elo correlation); a **per-fixture table** (L/D/W, top-3 cells, recommended
+vs naive tip + EV split); **simulation diagnostics** (invariants, title odds, group
+qualification); **bonus calibration** vs `historical_stats.py`; and an **automated
+PASS/WARN/FAIL anomaly block**.
 
 Workflow: to answer "why does the model do X?", run `diagnose` and read `diagnostic.md`
 first; for exact numbers or custom aggregation, read `diagnostic.json`. Example already
@@ -107,14 +133,19 @@ picks the lowest-total scoreline capturing the dominant tendency.
 - `tippspiel/config.py` — engine config (`load_config`) + tournament resolution from the same
   config file (`load_tournament` → `TournamentBundle`).
 - `tippspiel/report/backtest.py` — the `verify` historical backtest.
+- `tippspiel/training/` — offline model-fitting (not the hot path). `offdef_elo.py` is the
+  online Elo-for-goals fitter behind `fit-offdef`.
 - `tippspiel/data/tournaments/<name>/` — per-tournament data (teams/fixtures/results + optional
   `thirds_allocation.json`); `historical_stats.py` holds sourced reference stats (top-scorer
-  prior + validation bands). Config files: `config.yaml` + `configs/<name>.yaml`.
+  prior + validation bands). `data/historical/international_results.csv` is the committed
+  international-match corpus + `historical_results_adapter.py` loads/weights/name-maps it for the
+  off/def fit. Config files: `config.yaml` + `configs/<name>.yaml`.
 
 ## Conventions & gotchas
 
-- **Elo → goal rates are multiplicative**, never additive: `λ = (μ/2)·exp(±k·Δelo)`, so both
-  rates stay strictly positive for any matchup. There's a regression test guarding this.
+- **Elo → goal rates are multiplicative**, never additive: `λ = (μ/2)·exp(±k·Δelo + vol)`, so
+  both rates stay strictly positive for any matchup. There's a regression test guarding this.
+  `vol` is the off/def goal-volume term (see "Offensive/defensive Elo" above); `alpha=0` drops it.
 - **Simulator is fully vectorised and seed-deterministic**: same seed + inputs ⇒ identical
   output. Keep new aggregations as array ops; don't add per-iteration Python loops.
 - **Format-agnostic engine**: the simulator/bracket derive groups, the thirds count, and the

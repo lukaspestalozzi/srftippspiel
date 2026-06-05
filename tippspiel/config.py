@@ -108,6 +108,15 @@ def load_config(path: str | Path) -> Config:
     return cfg
 
 
+def load_offdef_block(path: str | Path) -> dict:
+    """The optional ``offdef:`` block (off/def Elo fit hyperparameters + weight tiers +
+    snapshot date), used by ``tippspiel fit-offdef``. Empty dict when absent — the fitter then
+    runs on its built-in defaults. Kept as a raw dict so ``config.py`` stays type-light; the
+    fit layer constructs its own dataclasses from it."""
+    _path, raw = _read(path)
+    return dict(raw.get("offdef", {}) or {})
+
+
 def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> TournamentBundle:
     """Parse the ``tournament:`` block (+ ``bonus_questions:``) of a config file.
 

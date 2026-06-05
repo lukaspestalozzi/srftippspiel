@@ -27,6 +27,7 @@ include = ["tippspiel*"]
 [tool.setuptools.package-data]
 tippspiel = [
     "data/tournaments/*/*.csv", "data/tournaments/*/*.json", "data/tournaments/*/*.yaml",
+    "data/historical/*.csv",
     "report/templates/*.j2",
 ]
 

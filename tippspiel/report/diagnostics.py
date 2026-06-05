@@ -167,6 +167,44 @@ def _behaviour_notes(pb: dict) -> list[str]:
     return notes
 
 
+# --------------------------------------------------------------------------- off/def Elo
+def _offdef_section(teams, predictor) -> dict:
+    """Fitted attack/defence ratings (``Team.att_elo``/``def_elo``) and how they enter the model.
+
+    Shows the most attack- vs defence-minded sides (att − def), the rating extremes, and the
+    correlation of each rating with scalar Elo — a low correlation on the att−def balance means
+    the off/def signal is genuinely orthogonal to overall strength (the point of the feature)."""
+    rows = [(t.name, float(t.elo), float(t.att_elo), float(t.def_elo)) for t in teams.values()]
+    alpha = float(getattr(predictor, "alpha", 0.0))
+    if not any(att or dfe for _, _, att, dfe in rows):
+        return {"available": False, "alpha": alpha}
+    atts = np.array([r[2] for r in rows])
+    defs = np.array([r[3] for r in rows])
+    elos = np.array([r[1] for r in rows])
+    bal = atts - defs  # >0 attack-minded, <0 defence-minded
+
+    def corr(x, y) -> float:
+        return float(np.corrcoef(x, y)[0, 1]) if x.std() > 0 and y.std() > 0 else 0.0
+
+    order_att = sorted(rows, key=lambda r: r[2], reverse=True)
+    order_def = sorted(rows, key=lambda r: r[3], reverse=True)
+    by_bal = sorted(range(len(rows)), key=lambda i: bal[i])
+    return {
+        "available": True,
+        "alpha": alpha,
+        "n": len(rows),
+        "att_range": [float(atts.min()), float(atts.max())],
+        "def_range": [float(defs.min()), float(defs.max())],
+        "corr_att_vs_elo": corr(atts, elos),
+        "corr_def_vs_elo": corr(defs, elos),
+        "corr_balance_vs_elo": corr(bal, elos),
+        "top_attack": [(n, a) for n, _, a, _ in order_att[:5]],
+        "top_defence": [(n, d) for n, _, _, d in order_def[:5]],
+        "most_attack_minded": [(rows[i][0], float(bal[i])) for i in reversed(by_bal[-5:])],
+        "most_defence_minded": [(rows[i][0], float(bal[i])) for i in by_bal[:5]],
+    }
+
+
 # --------------------------------------------------------------------------- simulation
 def _simulation_section(outcome, teams, fixtures) -> dict | None:
     if outcome is None:
@@ -303,7 +341,7 @@ def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- markdown
-def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
+def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) -> str:
     L = []
     L.append("# Claude Diagnostic Report")
     L.append("")
@@ -364,8 +402,43 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
             L.append(f"- {note}")
     L.append("")
 
-    # 3. Per-fixture detail
-    L.append("## 3. Per-fixture detail")
+    # 3. Offensive / defensive Elo
+    L.append("## 3. Offensive / defensive Elo")
+    L.append("")
+    if not offdef.get("available"):
+        L.append(f"_No att_elo/def_elo in teams.csv (run `tippspiel fit-offdef`); the off/def "
+                 f"volume term is inert. Predictor alpha = {offdef['alpha']}._")
+    else:
+        L.append(f"Per-team attack/defence log-rate ratings (fitted from historical goals). They "
+                 f"enter the predictor only as a symmetric goal-**volume** term with weight "
+                 f"alpha = {offdef['alpha']}: `vol = ((att_h+att_a) - (def_h+def_a))/2`, added to "
+                 f"both sides. Higher att = scores more; higher def = concedes fewer.")
+        L.append("")
+        L.append(_fixed_table(
+            ["metric", "value"],
+            [["teams rated", offdef["n"]],
+             ["att range", f"{offdef['att_range'][0]:+.2f} .. {offdef['att_range'][1]:+.2f}"],
+             ["def range", f"{offdef['def_range'][0]:+.2f} .. {offdef['def_range'][1]:+.2f}"],
+             ["corr(att, Elo)", f"{offdef['corr_att_vs_elo']:+.2f}"],
+             ["corr(def, Elo)", f"{offdef['corr_def_vs_elo']:+.2f}"],
+             ["corr(att-def balance, Elo)", f"{offdef['corr_balance_vs_elo']:+.2f}"]],
+        ))
+        L.append("")
+        L.append("Most attack-minded (att-def) vs most defence-minded:")
+        att_minded = "  ".join(f"{n} {v:+.2f}" for n, v in offdef["most_attack_minded"])
+        def_minded = "  ".join(f"{n} {v:+.2f}" for n, v in offdef["most_defence_minded"])
+        L.append(f"- **attack**: {att_minded}")
+        L.append(f"- **defence**: {def_minded}")
+        L.append("")
+        L.append(_fixed_table(
+            ["rank", "top attack (att_elo)", "top defence (def_elo)"],
+            [[i + 1, f"{a[0]} {a[1]:+.2f}", f"{d[0]} {d[1]:+.2f}"]
+             for i, (a, d) in enumerate(zip(offdef["top_attack"], offdef["top_defence"]))],
+        ))
+    L.append("")
+
+    # 4. Per-fixture detail
+    L.append("## 4. Per-fixture detail")
     rows = []
     for r in records:
         ldw = "/".join(f"{x:.0%}".rstrip("%") for x in r["ldw"])
@@ -384,8 +457,8 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
     ))
     L.append("")
 
-    # 4. Simulation diagnostics
-    L.append("## 4. Simulation diagnostics")
+    # 5. Simulation diagnostics
+    L.append("## 5. Simulation diagnostics")
     if sim is None:
         L.append("_Simulation skipped (--no-sim); advancement/title/bonus-sim sections unavailable._")
     else:
@@ -408,8 +481,8 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
             L.append(f"- **{letter}**: {line}")
     L.append("")
 
-    # 5. Bonus diagnostics
-    L.append("## 5. Bonus-question diagnostics")
+    # 6. Bonus diagnostics
+    L.append("## 6. Bonus-question diagnostics")
     for b in bonus:
         L.append("")
         L.append(f"### {b['label']} (`{b['id']}`)")
@@ -424,8 +497,8 @@ def _render_markdown(meta, pb, notes, records, sim, bonus, anomalies) -> str:
         ))
     L.append("")
 
-    # 6. Validation / anomaly summary
-    L.append("## 6. Validation / anomaly summary")
+    # 7. Validation / anomaly summary
+    L.append("## 7. Validation / anomaly summary")
     L.append(_fixed_table(
         ["check", "status", "detail"],
         [[a["name"], a["status"], a["detail"]] for a in anomalies],
@@ -445,6 +518,7 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
     records = _fixture_records(fixtures, teams, predictions, tipset)
     pb = _predictor_behaviour(records)
     notes = _behaviour_notes(pb)
+    offdef = _offdef_section(teams, predictor)
     sim = _simulation_section(outcome, teams, fixtures)
     bonus = _bonus_section(bundle, teams, outcome)
     anomalies = _anomaly_checks(predictions, records, pb, sim, bonus)
@@ -466,12 +540,13 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
     data = {
         "meta": meta,
         "predictor_behaviour": pb_notes,
+        "offdef": offdef,
         "fixtures": records,
         "simulation": sim,
         "bonus": bonus,
         "anomalies": anomalies,
     }
-    markdown = _render_markdown(meta, pb, notes, records, sim, bonus, anomalies)
+    markdown = _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies)
     return markdown, data
 
 

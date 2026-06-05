@@ -1,49 +1,49 @@
-team_id,name,elo,elo_trend
-ESP,Spain,2155,
-ARG,Argentina,2113,
-FRA,France,2062,
-ENG,England,2020,
-BRA,Brazil,1988,
-POR,Portugal,1984,
-COL,Colombia,1977,
-NED,Netherlands,1944,
-ECU,Ecuador,1935,
-GER,Germany,1925,
-NOR,Norway,1917,
-CRO,Croatia,1908,
-JPN,Japan,1906,
-TUR,Türkiye,1906,
-SUI,Switzerland,1894,
-URU,Uruguay,1892,
-BEL,Belgium,1888,
-MEX,Mexico,1875,
-SEN,Senegal,1867,
-PAR,Paraguay,1832,
-AUT,Austria,1830,
-MAR,Morocco,1824,
-CAN,Canada,1793,
-AUS,Australia,1774,
-IRN,Iran,1772,
-SCO,Scotland,1770,
-ALG,Algeria,1760,
-KOR,South Korea,1758,
-CZE,Czechia,1740,
-PAN,Panama,1734,
-USA,United States,1733,
-UZB,Uzbekistan,1718,
-SWE,Sweden,1712,
-EGY,Egypt,1699,
-CIV,Ivory Coast,1695,
-JOR,Jordan,1685,
-COD,DR Congo,1661,
-TUN,Tunisia,1633,
-IRQ,Iraq,1618,
-BIH,Bosnia and Herzegovina,1591,
-CPV,Cape Verde,1576,
-SAU,Saudi Arabia,1566,
-NZL,New Zealand,1563,
-HAI,Haiti,1554,
-RSA,South Africa,1518,
-GHA,Ghana,1510,
-CUW,Curaçao,1433,
-QAT,Qatar,1423,
+team_id,name,elo,elo_trend,att_elo,def_elo
+ESP,Spain,2155,,1.4658,1.3417
+ARG,Argentina,2113,,1.2848,1.6465
+FRA,France,2062,,1.1566,1.3101
+ENG,England,2020,,1.2855,1.5598
+BRA,Brazil,1988,,1.1527,1.4513
+POR,Portugal,1984,,1.3830,1.1705
+COL,Colombia,1977,,1.3287,1.2735
+NED,Netherlands,1944,,1.2582,1.1033
+ECU,Ecuador,1935,,0.6880,1.6087
+GER,Germany,1925,,1.3671,1.0933
+NOR,Norway,1917,,1.4425,0.9955
+CRO,Croatia,1908,,0.9579,1.0739
+JPN,Japan,1906,,1.0234,1.1273
+TUR,Türkiye,1906,,1.1415,0.9243
+SUI,Switzerland,1894,,1.1589,1.0244
+URU,Uruguay,1892,,0.8011,1.4413
+BEL,Belgium,1888,,1.1780,1.0688
+MEX,Mexico,1875,,0.7318,1.1923
+SEN,Senegal,1867,,0.8286,0.9914
+PAR,Paraguay,1832,,0.6535,1.1633
+AUT,Austria,1830,,0.8666,0.9952
+MAR,Morocco,1824,,0.7715,1.4261
+CAN,Canada,1793,,0.7610,0.9123
+AUS,Australia,1774,,0.7721,1.0308
+IRN,Iran,1772,,0.6038,0.7929
+SCO,Scotland,1770,,0.9384,0.8471
+ALG,Algeria,1760,,0.6952,0.7370
+KOR,South Korea,1758,,0.7666,0.7550
+CZE,Czechia,1740,,0.8821,0.7104
+PAN,Panama,1734,,0.6363,0.5213
+USA,United States,1733,,0.7645,0.8185
+UZB,Uzbekistan,1718,,0.3430,0.8760
+SWE,Sweden,1712,,0.9572,0.6086
+EGY,Egypt,1699,,0.3743,0.9387
+CIV,Ivory Coast,1695,,0.5994,0.7996
+JOR,Jordan,1685,,0.6560,0.6208
+COD,DR Congo,1661,,0.2971,0.8736
+TUN,Tunisia,1633,,0.4984,0.9076
+IRQ,Iraq,1618,,0.2923,0.6761
+BIH,Bosnia and Herzegovina,1591,,0.5342,0.6407
+CPV,Cape Verde,1576,,0.2216,0.4569
+SAU,Saudi Arabia,1566,,0.1283,0.6965
+NZL,New Zealand,1563,,0.6599,0.7216
+HAI,Haiti,1554,,0.4346,0.2849
+RSA,South Africa,1518,,0.4663,0.4424
+GHA,Ghana,1510,,0.4123,0.4790
+CUW,Curaçao,1433,,0.2104,0.3956
+QAT,Qatar,1423,,0.3708,0.0982

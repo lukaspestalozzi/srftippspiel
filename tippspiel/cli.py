@@ -5,6 +5,7 @@
     tippspiel diagnose       write the Claude diagnostic report (markdown + JSON)
     tippspiel verify         backtest the predictor against a completed tournament (pool points)
     tippspiel validate-data  check input files for schema/consistency errors
+    tippspiel fit-offdef     fit offensive/defensive Elo from history into teams.csv
 
 Each tournament is one config file; select it with ``--config <file>`` (default
 ``config.yaml``, FIFA World Cup 2026; further tournaments under ``configs/<name>.yaml``).
@@ -16,12 +17,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_config, load_tournament
+from .config import load_config, load_offdef_block, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import (
     run_pipeline,
     run_tuning,
     write_diagnostics,
+    write_offdef_snapshot,
     write_report,
     write_verification,
 )
@@ -112,6 +114,18 @@ def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
     print("recommended params:")
     for key, val in data["recommended_params"].items():
         print(f"  {key}: {val}")
+    return 0
+
+
+def _cmd_fit_offdef(bundle, config_path) -> int:
+    stats = write_offdef_snapshot(bundle, load_offdef_block(config_path))
+    print(f"[{bundle.display_name}] off/def Elo fitted from {stats['corpus_matches']:,} matches "
+          f"before {stats['snapshot_date']} ({stats['corpus_teams']} corpus teams); "
+          f"wrote att_elo/def_elo for {stats['teams_written']} teams.")
+    if stats["unmapped"]:
+        print(f"  WARN unmapped (defaulted to 0): {', '.join(stats['unmapped'])}")
+    print("  top attack:  " + ", ".join(f"{n} {v:+.2f}" for n, v in stats["top_attack"]))
+    print("  top defence: " + ", ".join(f"{n} {v:+.2f}" for n, v in stats["top_defence"]))
     return 0
 
 
@@ -231,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         ("predict", "group-stage predictions + tips only (no simulation)"),
         ("verify", "backtest the predictor against a completed tournament (pool points)"),
         ("validate-data", "check input files for errors"),
+        ("fit-offdef", "fit offensive/defensive Elo from history -> teams.csv att_elo/def_elo"),
     ]:
         _add_common_args(sub.add_parser(name, help=help_text), with_default=False)
     diag = sub.add_parser("diagnose", help="write the Claude diagnostic report (markdown + JSON)")
@@ -265,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_verify(cfg, bundle)
         if args.command == "validate-data":
             return _cmd_validate(cfg, bundle)
+        if args.command == "fit-offdef":
+            return _cmd_fit_offdef(bundle, config_path)
         if args.command == "diagnose":
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
         if args.command == "tune":

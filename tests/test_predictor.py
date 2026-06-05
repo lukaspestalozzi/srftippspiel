@@ -114,6 +114,48 @@ def test_host_bonus_applies_when_team_plays_in_its_own_country():
     assert at_home.p_home_win() > neutral.p_home_win()
 
 
+def test_alpha_zero_ignores_offdef_ratings():
+    # Default alpha=0 -> att/def have no effect; rates match the pure-Elo formula exactly.
+    p = EloPoissonPredictor(alpha=0.0)
+    plain = p.goal_rates(1900, 1800)
+    with_offdef = p.goal_rates(1900, 1800, att_home=0.9, def_home=0.1, att_away=-0.4, def_away=0.3)
+    assert with_offdef == plain
+
+
+def test_offdef_volume_is_symmetric_and_preserves_tendency():
+    # The off/def term is added to both sides equally, so it shifts total goals but leaves the
+    # win/draw/loss tendency ratio (lambda_h / lambda_a) untouched.
+    p = EloPoissonPredictor(alpha=0.7)
+    base_h, base_a = p.goal_rates(1900, 1800)
+    off_h, off_a = p.goal_rates(
+        1900, 1800, att_home=0.6, def_home=0.5, att_away=0.2, def_away=0.3
+    )
+    assert (off_h / off_a) == pytest.approx(base_h / base_a)  # tendency unchanged
+    # Combined attack (0.8) exceeds combined defence (0.8)? here equal-ish -> check a clear case.
+    hi_h, hi_a = p.goal_rates(1800, 1800, att_home=1.0, att_away=1.0, def_home=0.0, def_away=0.0)
+    assert hi_h > p.mu / 2.0 and hi_a > p.mu / 2.0  # two strong attacks -> more goals both sides
+    lo_h, lo_a = p.goal_rates(1800, 1800, att_home=0.0, att_away=0.0, def_home=1.0, def_away=1.0)
+    assert lo_h < p.mu / 2.0 and lo_a < p.mu / 2.0  # two strong defences -> fewer goals
+
+
+def test_offdef_rates_strictly_positive_for_extremes():
+    p = EloPoissonPredictor(alpha=1.0)
+    lh, la = p.goal_rates(2200, 1100, att_home=3.0, def_home=-3.0, att_away=-3.0, def_away=3.0)
+    assert lh > 0 and la > 0
+
+
+def test_predict_uses_team_offdef_to_raise_total_goals():
+    p = EloPoissonPredictor(alpha=0.8, rho=0.0)
+    plain = {"AAA": Team("AAA", "A", 1800.0), "BBB": Team("BBB", "B", 1800.0)}
+    attackers = {
+        "AAA": Team("AAA", "A", 1800.0, att_elo=1.0, def_elo=-0.5),
+        "BBB": Team("BBB", "B", 1800.0, att_elo=1.0, def_elo=-0.5),
+    }
+    base = p.predict(_match(Stage.GROUP), plain).scoreline
+    high = p.predict(_match(Stage.GROUP), attackers).scoreline
+    assert _expected_total(high) > _expected_total(base)
+
+
 def test_expansion_reproduces_target_ldw_balance():
     sd = expand_1x2_to_scoreline(0.6, 0.25, 0.15, total_goals=2.6)
     # home-vs-away win balance should be matched closely.
