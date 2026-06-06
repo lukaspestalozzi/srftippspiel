@@ -7,7 +7,8 @@ a file and all downstream predictions and simulations are conditioned on them.
 
 ## What it does
 
-1. **Predicts** each match as a full scoreline distribution (Elo-Poisson model).
+1. **Predicts** each match as a full scoreline distribution (Elo-Poisson model, with an
+   optional per-team offensive/defensive goal-volume layer fitted from match history).
 2. **Optimises** the tip per match to maximise expected pool points (not just the most
    likely scoreline — those differ, and the difference is where the edge is).
 3. **Simulates** the whole tournament 50,000 times (Monte Carlo) to get group-advancement
@@ -31,6 +32,7 @@ tippspiel predict                 # group-stage predictions + tips only (Phase 1
 tippspiel run                     # full pipeline: predict + 50k simulations + report
 tippspiel verify                  # backtest the predictor on a completed tournament (pool points + calibration)
 tippspiel tune                    # sweep predictor params vs the completed-tournament backtests
+tippspiel fit-offdef              # fit per-team offensive/defensive Elo from history into teams.csv
 tippspiel run --config configs/womenseuro2025.yaml   # run for a different tournament
 ```
 
@@ -57,9 +59,20 @@ tournaments ship as seeded benchmarks — `womenseuro2025`, `wc2022`, `euro2024`
 `euro2020`; the model beats the naive baseline on all five. Output: `output/verify.{md,json}`.
 
 `tippspiel tune` sweeps the predictor parameters (`mu`, `k`, `rho`, `host_elo_bonus`,
-`ko_goal_scale`) over those benchmarks and writes a leaderboard (`output/tune.{md,json}`),
-ranking by calibration with pool points as the tie-break, plus a leave-one-tournament-out
-generalisation check. The shipped config parameters are the tuned result.
+`ko_goal_scale`, `alpha`) over those benchmarks and writes a leaderboard
+(`output/tune.{md,json}`), ranking by calibration with pool points as the tie-break, plus a
+leave-one-tournament-out generalisation check. The shipped config parameters are the tuned result.
+
+## Offensive/defensive Elo
+
+A single Elo rating sets *who* wins but makes every match expect the same total goals. To add
+the goal-**volume** dimension — a Spain–Norway shoot-out vs. an Italy–Greece stalemate — each
+team also carries `att_elo` (attack) and `def_elo` (defence), fitted by `tippspiel fit-offdef`
+from the full international match-goal history (1872–present, committed under
+`tippspiel/data/historical/`) using an online, Elo-style update on goals scored/conceded
+(FIFA-importance-weighted). The predictor folds them in as a symmetric volume term with a tunable
+weight `alpha` (0 = pure Elo); two strong attacks → higher-scoring, two stingy defences → tighter.
+`fit-offdef` snapshots ratings as of the day before kickoff and writes them into `teams.csv`.
 
 ## Configuration
 
@@ -70,6 +83,14 @@ surfaced in the report: same seed + same inputs ⇒ identical output. The predic
 correction; negative lifts draws over 1:0/0:1), `host_elo_bonus` (applied when a team plays in
 its own country), and `ko_goal_scale` (knockout goal-rate multiplier, since knockout results
 are the 120-minute scoreline).
+
+A separate `strategy:` block holds **`realism_tolerance`**. Pure expected-points maximisation
+tips a shutout (one team scores 0) in ~89% of matches — correct for points, but unrealistic,
+since the tendency (5) and goal-diff (3) terms dwarf the per-team goal terms (1+1). With a small
+tolerance, the optimiser picks — among scorelines within that many pool-points of the EV optimum
+— the one closest to the model's expected score, flipping e.g. `1:0`→`2:1` (same winner and
+margin) when the model expects goals. `0` reproduces strict EV; `~0.15` lifts both-teams-score
+tips to a realistic ~50% at a negligible (<2%) points cost.
 
 ## Scoring rules implemented
 
@@ -82,7 +103,7 @@ World Champion bonus = 50 points.
 
 | File | Contents |
 |---|---|
-| `teams.csv` | teams: `team_id, name, elo, elo_trend` |
+| `teams.csv` | teams: `team_id, name, elo, elo_trend` (+ optional `att_elo, def_elo` from `fit-offdef`) |
 | `fixtures.csv` | all matches. Group rows use concrete teams; knockout rows use concrete teams for a completed event, else structured references — `W:A`/`R:B` (group winner/runner-up), `3RD:74:ABCDF` (a best-third filling slot 74 from the listed groups), `WIN:M101`/`LOSE:M101` (winner/loser of a match). The bracket is derived from these. |
 | `results.csv` | played matches (append rows as the tournament runs; full for a completed event) |
 | `thirds_allocation.json` | *optional* — explicit third-place combination→slot table (FIFA "Annex C"); absent ⇒ constraint-respecting bipartite fallback |
@@ -92,7 +113,8 @@ The tournament's display name, `completed` flag, data folder, Elo source and `bo
 live in its **config file** (`config.yaml` / `configs/<name>.yaml`), not in the data folder.
 
 `data/eloratings_adapter.py` converts an eloratings.net `World.tsv` export into
-`teams.csv`; `data/odds_adapter.py` converts a raw bookmaker 1X2 export into `odds.csv`. Elo
+`teams.csv`; `data/odds_adapter.py` converts a raw bookmaker 1X2 export into `odds.csv`;
+`data/historical_results_adapter.py` loads the international-match corpus for `fit-offdef`. Elo
 ratings and odds change over time — refresh both shortly before kickoff (11 June 2026).
 
 ### Data provenance & the one remaining approximation (snapshot, June 2026)

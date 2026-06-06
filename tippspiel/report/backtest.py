@@ -46,7 +46,9 @@ def _scoreline_nll(dist: ScorelineDistribution, actual_h: int, actual_a: int) ->
     return -math.log(max(dist.cell(h, a), _NLL_EPS))
 
 
-def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str, dict]:
+def build_verification(
+    bundle, teams, fixtures, results, predictor, realism_tolerance: float = 0.0
+) -> tuple[str, dict]:
     by_id = {m.match_id: m for m in fixtures}
     records: list[dict] = []
     for mid, actual in results.items():
@@ -55,7 +57,7 @@ def build_verification(bundle, teams, fixtures, results, predictor) -> tuple[str
             continue
         weight = match.stage.points_weight
         dist = predictor.predict(match, teams).scoreline
-        mh, ma, _ = best_tip(dist, weight)
+        mh, ma, _ = best_tip(dist, weight, realism_tolerance)
         nh, na, _ = dist.most_likely_scorelines(1)[0]
         model_pts = score_tip(mh, ma, actual.home_goals, actual.away_goals, weight)
         naive_pts = score_tip(nh, na, actual.home_goals, actual.away_goals, weight)

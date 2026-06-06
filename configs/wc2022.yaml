@@ -11,6 +11,7 @@ predictor:
     rho: -0.1
     host_elo_bonus: 40
     ko_goal_scale: 1.2
+    alpha: 0.7           # off/def goal-volume weight (att_elo/def_elo in teams.csv; see config.yaml)
 
 simulation:
   iterations: 50000
@@ -20,6 +21,9 @@ simulation:
 report:
   output_dir: output/
   display_timezone: Europe/Zurich
+
+strategy:
+  realism_tolerance: 0.15   # realistic tips; 0 = strict EV (see config.yaml)
 
 tournament:
   name: wc2022

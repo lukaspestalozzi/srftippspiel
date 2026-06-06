@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 from .config import Config, TournamentBundle
@@ -44,7 +45,10 @@ def build_predictor(cfg: Config, odds: dict[str, Odds1X2] | None = None) -> Pred
 
 
 def build_strategy(cfg: Config, bundle: TournamentBundle) -> ExpectedPointsStrategy:
-    return ExpectedPointsStrategy(bonus_question_configs=bundle.bonus_questions)
+    return ExpectedPointsStrategy(
+        bonus_question_configs=bundle.bonus_questions,
+        realism_tolerance=cfg.strategy.realism_tolerance,
+    )
 
 
 def _predict_tippable(
@@ -179,7 +183,10 @@ def write_verification(cfg: Config, bundle: TournamentBundle) -> dict:
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
     predictor = build_predictor(cfg, odds=provider.get_odds())
-    markdown, data = build_verification(bundle, teams, fixtures, results, predictor)
+    markdown, data = build_verification(
+        bundle, teams, fixtures, results, predictor,
+        realism_tolerance=cfg.strategy.realism_tolerance,
+    )
     paths = VerificationWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
 
@@ -202,6 +209,95 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
+def write_offdef_snapshot(bundle: TournamentBundle, offdef_block: dict | None = None) -> dict:
+    """Fit offensive/defensive Elo from the historical corpus and persist it to teams.csv.
+
+    Fits ``att_elo``/``def_elo`` for every team in the corpus from all matches **strictly
+    before** the tournament's first kickoff (so a ``verify`` backtest stays leak-free), then
+    writes the subset mapping to this tournament's teams back into its ``teams.csv`` (preserving
+    the existing columns). Returns a small stats dict for the CLI to print.
+    """
+    import csv as _csv
+
+    from .data.historical_results_adapter import (
+        DEFAULT_CORPUS,
+        WeightTiers,
+        corpus_name_for,
+        load_corpus,
+        ratings_for_team,
+    )
+    from .training.offdef_elo import OffDefParams, OffDefRating, fit_off_def
+
+    block = dict(offdef_block or {})
+    params = OffDefParams(
+        mu=float(block.get("mu", OffDefParams.mu)),
+        k_att=float(block.get("k_att", OffDefParams.k_att)),
+        k_def=float(block.get("k_def", OffDefParams.k_def)),
+        gamma_home=float(block.get("gamma_home", OffDefParams.gamma_home)),
+        residual_cap=float(block.get("residual_cap", OffDefParams.residual_cap)),
+        epochs=int(block.get("epochs", OffDefParams.epochs)),
+    )
+    w = block.get("weights", {}) or {}
+    tiers = WeightTiers(
+        friendly=float(w.get("friendly", WeightTiers.friendly)),
+        qualifier=float(w.get("qualifier", WeightTiers.qualifier)),
+        continental=float(w.get("continental", WeightTiers.continental)),
+        world_cup=float(w.get("world_cup", WeightTiers.world_cup)),
+        default=float(w.get("default", WeightTiers.default)),
+    )
+    corpus_path = block.get("corpus_file", DEFAULT_CORPUS)
+
+    provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+    fixtures = provider.get_fixtures()
+    snapshot = block.get("snapshot_date") or min(m.kickoff for m in fixtures).date().isoformat()
+
+    matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers)
+    ratings = fit_off_def(matches, params)
+
+    teams = provider.get_teams()
+    by_id: dict[str, OffDefRating] = {}
+    unmapped: list[str] = []
+    for t in teams:
+        by_id[t.team_id] = ratings_for_team(t.name, ratings)
+        if corpus_name_for(t.name) not in ratings:
+            unmapped.append(t.name)
+
+    _write_teams_csv_with_offdef(bundle.teams_file, by_id, _csv)
+
+    ranked_att = sorted(teams, key=lambda t: by_id[t.team_id].att, reverse=True)
+    ranked_def = sorted(teams, key=lambda t: by_id[t.team_id].def_, reverse=True)
+    return {
+        "snapshot_date": snapshot,
+        "corpus_matches": len(matches),
+        "corpus_teams": len(ratings),
+        "teams_written": len(teams),
+        "unmapped": unmapped,
+        "top_attack": [(t.name, by_id[t.team_id].att) for t in ranked_att[:5]],
+        "top_defence": [(t.name, by_id[t.team_id].def_) for t in ranked_def[:5]],
+    }
+
+
+def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
+    """Rewrite teams.csv with att_elo/def_elo columns appended, preserving existing columns."""
+    with open(teams_file, newline="") as fh:
+        reader = _csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    for col in ("att_elo", "def_elo"):
+        if col not in fieldnames:
+            fieldnames.append(col)
+    for row in rows:
+        tid = (row.get("team_id") or "").strip()
+        r = by_id.get(tid)
+        if r is not None:
+            row["att_elo"] = f"{r.att:.4f}"
+            row["def_elo"] = f"{r.def_:.4f}"
+    with open(teams_file, "w", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor,
     market_predictions=None, odds=None,
@@ -215,12 +311,19 @@ def _build_report_context(
         "odds_ids": set(odds or {}),
         "odds": odds or {},
     }
+    # Off/def goal-volume weight of the active predictor; gates the per-fixture att/def display.
+    alpha = float(getattr(predictor, "alpha", 0.0))
+    # The legend is shown only when the rows will actually appear, i.e. alpha>0 AND some team
+    # carries a fitted rating (else `fit-offdef` was never run and every row would be empty).
+    uses_offdef = alpha > 0 and any(t.att_elo or t.def_elo for t in teams.values())
+    # Realism tolerance keeps the report's market-odds tip consistent with the recommended tip.
+    realism = cfg.strategy.realism_tolerance
     group_fixtures = _group_fixture_blocks(
-        teams, fixtures, results, predictions, tipset, market
+        teams, fixtures, results, predictions, tipset, market, alpha, realism
     )
     advancement = _advancement_sections(teams, fixtures, outcome)
     knockout_fixtures = _knockout_sections(
-        teams, fixtures, results, predictions, tipset, outcome, market
+        teams, fixtures, results, predictions, tipset, outcome, market, alpha, realism
     )
 
     title_odds_chart = None
@@ -243,6 +346,7 @@ def _build_report_context(
         "mc_iterations": outcome.mc_iterations if outcome else None,
         "mc_seed": outcome.mc_seed if outcome else None,
         "results_count": len(results),
+        "uses_offdef": uses_offdef,
     }
     return {
         "header": header,
@@ -257,7 +361,7 @@ def _build_report_context(
 
 
 def _fixture_block(
-    m, teams, results, predictions, tipset, weight, market=None
+    m, teams, results, predictions, tipset, weight, market=None, alpha=0.0, realism=0.0
 ) -> dict:
     name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
     name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
@@ -281,18 +385,19 @@ def _fixture_block(
         nh, na, _ = dist.most_likely_scorelines(1)[0]
         block["naive"] = {"home": nh, "away": na,
                           "ev": expected_points(dist, nh, na, weight)}
-    _set_market_tips(block, m, weight, market)
+    _set_market_tips(block, m, weight, market, realism)
     rec = (rec_h, rec_a) if tip is not None else None
-    block["data"] = _fixture_data(m, teams, dist, rec, weight, market)
+    block["data"] = _fixture_data(m, teams, dist, rec, weight, market, alpha)
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
     block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
     return block
 
 
-def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
+def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
     """The underlying prediction numbers surfaced in the per-fixture data table — the same
     payload ``diagnostics._fixture_records`` assembles, so a reader can see *why* a tip wins
-    (Elo, exact L/D/W, top scorelines, the EV breakdown, expected goals, de-vigged market odds).
+    (Elo, off/def ratings, exact L/D/W, top scorelines, the EV breakdown, expected goals,
+    de-vigged market odds).
     """
     e_home, e_away = dist.expected_goals()
     data = {
@@ -300,14 +405,26 @@ def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
         "exp_goals": {"home": e_home, "away": e_away, "total": e_home + e_away},
         "top3": [(h, a, p) for h, a, p in dist.most_likely_scorelines(3)],
         "elo": None,
+        "offdef": None,
         "rec_components": None,
         "rec_cell_prob": None,
         "market_probs": None,
     }
-    # Elo only when both sides are concrete teams (knockout slots may be placeholders).
+    # Elo + off/def only when both sides are concrete teams (knockout slots may be placeholders).
     if m.home.is_concrete and m.away.is_concrete:
-        eh, ea = teams[m.home.team_id].elo, teams[m.away.team_id].elo
-        data["elo"] = {"home": eh, "away": ea, "diff": eh - ea}
+        th, ta = teams[m.home.team_id], teams[m.away.team_id]
+        data["elo"] = {"home": th.elo, "away": ta.elo, "diff": th.elo - ta.elo}
+        # Show the att/def ratings the model is actually using (only when alpha>0 and the teams
+        # carry fitted ratings), with the net goal-volume effect this matchup gets vs pure Elo.
+        if alpha and (th.att_elo or th.def_elo or ta.att_elo or ta.def_elo):
+            raw_vol = ((th.att_elo + ta.att_elo) - (th.def_elo + ta.def_elo)) / 2.0
+            pct = (math.exp(alpha * raw_vol) - 1.0) * 100.0
+            data["offdef"] = {
+                "home_name": th.name, "away_name": ta.name,
+                "att_home": th.att_elo, "def_home": th.def_elo,
+                "att_away": ta.att_elo, "def_away": ta.def_elo,
+                "pct": f"{pct:+.0f}% goals",
+            }
     if rec is not None:
         rec_h, rec_a = rec
         data["rec_components"] = ev_components(dist, rec_h, rec_a, weight)
@@ -320,7 +437,7 @@ def _fixture_data(m, teams, dist, rec, weight, market) -> dict:
     return data
 
 
-def _set_market_tips(block, m, weight, market) -> None:
+def _set_market_tips(block, m, weight, market, realism=0.0) -> None:
     """Attach the EV-optimal market-odds tip to ``block`` — shown only for fixtures backed by
     genuine bookmaker odds, so it's a real market prediction rather than a silent Elo-fallback
     duplicate of the recommended tip. No-op when the fixture has no odds."""
@@ -330,16 +447,17 @@ def _set_market_tips(block, m, weight, market) -> None:
     if market_pred is None:
         return
     mdist = market_pred.scoreline
-    th, ta, ev = best_tip(mdist, weight)
+    th, ta, ev = best_tip(mdist, weight, realism)
     block["market_tip"] = {"home": th, "away": ta, "ev": ev}
 
 
 def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
-                          market=None) -> list[dict]:
+                          market=None, alpha=0.0, realism=0.0) -> list[dict]:
     """All group-stage fixtures as one globally chronological list (not grouped into per-group
     sections). Each block carries its ``group`` letter, surfaced as a tag in the report."""
     ms = sorted((m for m in fixtures if m.group), key=lambda m: m.kickoff)
-    return [_fixture_block(m, teams, results, predictions, tipset, 1, market) for m in ms]
+    return [_fixture_block(m, teams, results, predictions, tipset, 1, market, alpha, realism)
+            for m in ms]
 
 
 def _advancement_sections(teams, fixtures, outcome) -> list[dict]:
@@ -375,7 +493,7 @@ def _advancement_chart(letter, group_matches, teams, outcome):
 
 
 def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
-                       market=None) -> list[dict]:
+                       market=None, alpha=0.0, realism=0.0) -> list[dict]:
     # Emit knockout fixtures in chronological (kickoff) order so the report reads as a timeline.
     # The fixtures file orders them by bracket position (M73..M104), which is not by date.
     ko_matches = sorted((m for m in fixtures if m.group is None), key=lambda m: m.kickoff)
@@ -383,7 +501,7 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
     for m in ko_matches:
         if m.participants_known or m.match_id in results:
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
-                                         market))
+                                         market, alpha, realism))
         else:
             note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,

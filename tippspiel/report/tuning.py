@@ -17,16 +17,21 @@ from ..predictors.elo_poisson import EloPoissonPredictor
 from .backtest import build_verification
 from .diagnostics import _fixed_table, _json_default
 
-# Coarse default sweep grid. gmax is fixed (truncation, not a behaviour lever).
+# Coarse default sweep grid. gmax is fixed (truncation, not a behaviour lever). ``alpha`` is
+# the off/def goal-volume weight; it needs att_elo/def_elo populated in the benchmark teams.csv
+# (run `tippspiel fit-offdef` per tournament) to have any effect — at alpha 0 it is a no-op.
+# Trimmed from the pre-alpha grid (dropped the rarely-optimal extremes) so adding the alpha
+# axis keeps the sweep near its original runtime; the currently-tuned set stays reachable.
 DEFAULT_GRID: dict[str, list] = {
-    "mu": [2.4, 2.6, 2.8, 3.0, 3.2],
-    "k": [0.0010, 0.0015, 0.0020, 0.0025],
-    "rho": [-0.10, -0.05, 0.0, 0.05],
+    "mu": [2.4, 2.6, 2.8, 3.0],
+    "k": [0.0015, 0.0020, 0.0025],
+    "rho": [-0.10, -0.05, 0.0],
     "host_elo_bonus": [0, 40, 80],
-    "ko_goal_scale": [1.0, 1.1, 1.2, 1.33],
+    "ko_goal_scale": [1.1, 1.2, 1.33],
+    "alpha": [0.0, 0.5, 0.7],
 }
 _GMAX = 7
-_TUNED_KEYS = ("mu", "k", "rho", "host_elo_bonus", "ko_goal_scale")
+_TUNED_KEYS = ("mu", "k", "rho", "host_elo_bonus", "ko_goal_scale", "alpha")
 
 
 def _iter_grid(grid: dict[str, list]):
@@ -43,6 +48,7 @@ def _default_params(base_cfg) -> dict:
         "rho": p.get("rho", 0.0),
         "host_elo_bonus": p.get("host_elo_bonus", 0.0),
         "ko_goal_scale": p.get("ko_goal_scale", 1.0),
+        "alpha": p.get("alpha", 0.0),
     }
 
 
@@ -56,7 +62,10 @@ def _evaluate(params: dict, benchmarks: list) -> dict:
     rps_sum = nll_sum = 0.0
     per_tournament: dict[str, dict] = {}
     for bundle, teams, fixtures, results in benchmarks:
-        _md, data = build_verification(bundle, teams, fixtures, results, predictor)
+        # realism_tolerance is fixed at 0 here: it only shifts pool points (never RPS/NLL), so a
+        # swept value would be driven to 0 by the RPS-primary objective. It's set separately.
+        _md, data = build_verification(bundle, teams, fixtures, results, predictor,
+                                       realism_tolerance=0.0)
         s = data["summary"]["all"]
         c = data["calibration"]["all"]
         n += s["matches"]
@@ -159,7 +168,7 @@ def _row(r: dict) -> dict:
 
 def _fmt_params(p: dict) -> str:
     return (f"mu{p['mu']} k{p['k']} rho{p['rho']} "
-            f"host{int(p['host_elo_bonus'])} ko{p['ko_goal_scale']}")
+            f"host{int(p['host_elo_bonus'])} ko{p['ko_goal_scale']} a{p.get('alpha', 0.0)}")
 
 
 def _render(data: dict) -> str:
@@ -171,7 +180,7 @@ def _render(data: dict) -> str:
     d, r = data["default_metrics"], data["recommended_metrics"]
     L.append("## Default vs recommended")
     L.append(_fixed_table(
-        ["set", "mu/k/rho/host/ko", "mean RPS", "mean NLL", "model", "%max", "exact"],
+        ["set", "mu/k/rho/host/ko/a", "mean RPS", "mean NLL", "model", "%max", "exact"],
         [
             ["default", _fmt_params(data["default_params"]), f"{d['mean_rps']:.4f}",
              f"{d['mean_nll']:.4f}", d["model"], f"{d['model_pct']:.1f}", d["exact_hits"]],
@@ -192,7 +201,7 @@ def _render(data: dict) -> str:
               f"{row['mean_nll']:.4f}", row["model"], f"{row['model_pct']:.1f}", row["exact_hits"]]
              for i, row in enumerate(data["leaderboard"])]
     L.append(_fixed_table(
-        ["#", "mu/k/rho/host/ko", "mean RPS", "mean NLL", "model", "%max", "exact"], lrows))
+        ["#", "mu/k/rho/host/ko/a", "mean RPS", "mean NLL", "model", "%max", "exact"], lrows))
     L.append("")
     L.append("## Leave-one-tournament-out (generalisation check)")
     L.append("Params chosen on the other two tournaments, scored on the held-out one.")

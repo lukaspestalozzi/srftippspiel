@@ -75,6 +75,80 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     assert len(result["tipset"].tips) == 72
 
 
+def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
+    # The pool report surfaces each team's att/def + goal-volume effect when the predictor
+    # actually uses them (alpha>0), and hides the row entirely when alpha=0.
+    on = dataclasses.replace(
+        small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
+    )
+    html_on = Path(write_report(on, run_pipeline(on, BUNDLE, simulate=False)["context"])).read_text()
+    assert "Attack / defence" in html_on
+    assert "goal-volume layer" in html_on  # the one-time legend
+
+    off = dataclasses.replace(
+        on, predictor=dataclasses.replace(on.predictor, params={**on.predictor.params, "alpha": 0.0})
+    )
+    ctx_off = run_pipeline(off, BUNDLE, simulate=False)["context"]
+    html_off = Path(write_report(off, ctx_off)).read_text()
+    assert "Attack / defence" not in html_off
+    assert "goal-volume layer" not in html_off
+    assert all(f["data"]["offdef"] is None for f in ctx_off["group_fixtures"] if f["data"])
+
+
+def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
+    # alpha>0 but no team has fitted att/def (fit-offdef never run) must NOT show the legend —
+    # otherwise it would promise a per-fixture att/def row that never renders.
+    from tippspiel.data.file_provider import FileDataProvider
+
+    orig = FileDataProvider.get_teams
+    FileDataProvider.get_teams = lambda self: [
+        dataclasses.replace(t, att_elo=0.0, def_elo=0.0) for t in orig(self)
+    ]
+    try:
+        cfg = dataclasses.replace(
+            small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
+        )
+        assert cfg.predictor.params["alpha"] > 0  # guard: the config does enable off/def
+        ctx = run_pipeline(cfg, BUNDLE, simulate=False)["context"]
+    finally:
+        FileDataProvider.get_teams = orig
+    assert ctx["header"]["uses_offdef"] is False
+    html = Path(write_report(cfg, ctx)).read_text()
+    assert "goal-volume layer" not in html
+    assert "Attack / defence" not in html
+
+
+def test_realism_tolerance_raises_both_score_share(small_cfg):
+    # A realism tolerance on the EV optimiser lifts the share of tips where BOTH teams score
+    # from the ~8% strict-EV rate toward a realistic ~50%.
+    from tippspiel.config import StrategyConfig
+
+    def both_score_share(tol):
+        cfg = dataclasses.replace(small_cfg, strategy=StrategyConfig(realism_tolerance=tol))
+        tips = run_pipeline(cfg, BUNDLE, simulate=False)["tipset"].tips
+        return sum(t.tip_home > 0 and t.tip_away > 0 for t in tips.values()) / len(tips)
+
+    legacy = both_score_share(0.0)
+    realistic = both_score_share(0.15)
+    assert realistic > 0.40             # tolerance reaches a realistic both-teams-score rate
+    assert realistic - legacy >= 0.15   # and clearly lifts it above the strict-EV baseline
+
+
+def test_strategy_config_parses_realism_tolerance(tmp_path):
+    from tippspiel.config import load_config
+
+    base = (
+        "predictor: {name: elo_poisson, params: {}}\n"
+        "simulation: {iterations: 10, seed: 1, penalty_model: coin_flip}\n"
+        "report: {output_dir: out/, display_timezone: UTC}\n"
+    )
+    p = tmp_path / "c.yaml"
+    p.write_text(base)
+    assert load_config(p).strategy.realism_tolerance == 0.0  # omitted -> legacy default
+    p.write_text(base + "strategy: {realism_tolerance: 0.2}\n")
+    assert load_config(p).strategy.realism_tolerance == 0.2
+
+
 def test_played_match_excluded_from_tips(small_cfg):
     # A played match must not receive a tip (its result is fixed).
     cfg = small_cfg
@@ -99,12 +173,18 @@ def test_fixture_block_carries_underlying_data(small_cfg):
     assert tipped, "expected at least one tipped group fixture with data"
     for f in tipped:
         d = f["data"]
-        assert {"ldw", "exp_goals", "top3", "elo", "rec_components", "rec_cell_prob"} <= set(d)
+        assert {"ldw", "exp_goals", "top3", "elo", "offdef", "rec_components",
+                "rec_cell_prob"} <= set(d)
         # L/D/W is a partition; EV components sum to the recommended (displayed) EV.
         assert d["ldw"]["home"] + d["ldw"]["draw"] + d["ldw"]["away"] == pytest.approx(1.0)
         assert d["rec_components"]["total"] == pytest.approx(f["tip"]["ev"])
         # Group fixtures have concrete teams -> Elo populated.
         assert d["elo"] is not None
+        # config.yaml fits off/def + sets alpha>0, so att/def are surfaced per fixture.
+        assert d["offdef"] is not None
+        assert {"home_name", "att_home", "def_home", "att_away", "def_away", "pct"} <= set(
+            d["offdef"]
+        )
         # Market probs appear only for odds-backed fixtures; when present they are a de-vigged
         # 1X2 partition.
         if d["market_probs"] is not None:

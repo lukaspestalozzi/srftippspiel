@@ -4,6 +4,7 @@
     <tr><th>Model L/D/W</th><td>{{ "%.1f"|format(d.ldw.home*100) }}% / {{ "%.1f"|format(d.ldw.draw*100) }}% / {{ "%.1f"|format(d.ldw.away*100) }}%</td></tr>
     <tr><th>Expected goals</th><td>{{ "%.2f"|format(d.exp_goals.home) }}–{{ "%.2f"|format(d.exp_goals.away) }} <span class="sub">(total {{ "%.2f"|format(d.exp_goals.total) }})</span></td></tr>
     {% if d.elo %}<tr><th>Elo</th><td>{{ "%.0f"|format(d.elo.home) }} vs {{ "%.0f"|format(d.elo.away) }} <span class="sub">(Δ {{ "%+.0f"|format(d.elo.diff) }})</span></td></tr>{% endif %}
+    {% if d.offdef %}<tr><th>Attack / defence</th><td>{{ d.offdef.home_name }} att <b>{{ "%+.2f"|format(d.offdef.att_home) }}</b> / def <b>{{ "%+.2f"|format(d.offdef.def_home) }}</b> · {{ d.offdef.away_name }} att <b>{{ "%+.2f"|format(d.offdef.att_away) }}</b> / def <b>{{ "%+.2f"|format(d.offdef.def_away) }}</b> <span class="sub">(off/def goal-volume {{ d.offdef.pct }})</span></td></tr>{% endif %}
     <tr><th>Top scorelines</th><td>{% for h, a, p in d.top3 %}{{ h }}–{{ a }} ({{ "%.1f"|format(p*100) }}%){% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
     {% if d.rec_components %}<tr><th>Why this tip</th><td>tendency {{ "%.2f"|format(d.rec_components.tendency) }} + home {{ "%.2f"|format(d.rec_components.home_goals) }} + away {{ "%.2f"|format(d.rec_components.away_goals) }} + diff {{ "%.2f"|format(d.rec_components.goal_diff) }} = <b>{{ "%.2f"|format(d.rec_components.total) }}</b> <span class="sub">· P(exact tip) {{ "%.1f"|format(d.rec_cell_prob*100) }}%</span></td></tr>{% endif %}
     {% if d.market_probs %}<tr><th>Market (de-vigged)</th><td>{{ "%.1f"|format(d.market_probs.home*100) }}% / {{ "%.1f"|format(d.market_probs.draw*100) }}% / {{ "%.1f"|format(d.market_probs.away*100) }}%</td></tr>{% endif %}
@@ -40,8 +41,6 @@
   details[open] > summary { border-bottom:1px solid var(--line); }
   .summary-right { font-weight:400; color:var(--muted); font-size:.9rem; }
   .fixture-body { padding: 8px 16px 16px; }
-  .tipline { background:#fff7f0; border:1px solid #f3d3bd; border-radius:6px;
-             padding:10px 14px; margin:10px 0; }
   .tip-score { color:var(--tip); font-weight:700; font-size:1.15rem; }
   .badge { display:inline-block; background:#eef4f9; color:var(--accent);
            border-radius:10px; padding:1px 8px; font-size:.78rem; }
@@ -73,6 +72,7 @@
   </p>
   <table class="kv meta"><tr><td>Predictor params</td>
     <td><span class="pre">{{ header.predictor_params }}</span></td></tr></table>
+  {% if header.uses_offdef %}<p class="meta">This run uses the <b>offensive/defensive Elo</b> goal-volume layer (<code>alpha &gt; 0</code>): each team's fitted <b>att</b> (higher = scores more) and <b>def</b> (higher = concedes fewer), centred over all international teams, nudge a match's predicted total goals up or down. Each fixture below shows the two teams' att/def and the net goal-volume effect on that matchup.</p>{% endif %}
 
   <div class="toc">
     <b>Contents</b>
@@ -90,25 +90,17 @@
   <h2 id="groups">Group-stage fixtures</h2>
   <p class="meta">All group matches in kickoff order; each is tagged with its group.</p>
   {% for fx in group_fixtures %}
-    <div class="card"><details {% if not fx.played %}open{% endif %}>
+    <div class="card"><details>
       <summary>
         <span><span class="badge">Group {{ fx.group }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
         </span>
-        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% endif %}</span>
+        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · Recommended tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b> <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>{% if fx.naive %} <span class="meta">vs naive {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}{% if fx.market_tip %} <span class="meta">· Market-odds tip: {{ fx.market_tip.home }}–{{ fx.market_tip.away }} (EV {{ "%.2f"|format(fx.market_tip.ev) }})</span>{% endif %}{% endif %}</span>
       </summary>
       <div class="fixture-body">
         {% if fx.played %}
           <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
         {% else %}
-          {% if fx.tip %}
-          <div class="tipline">
-            Recommended tip: <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
-            <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts</span>
-            {% if fx.naive %}<span class="meta">vs naive most-likely {{ fx.naive.home }}–{{ fx.naive.away }} (EV {{ "%.2f"|format(fx.naive.ev) }})</span>{% endif %}
-            {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}
-          </div>
-          {% endif %}
           {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
           <div class="grid2">
             <div>{{ fx.ldw_chart | safe }}</div>
@@ -127,18 +119,15 @@
   {% if knockout_fixtures %}
   <h2 id="knockout">Knockout fixtures</h2>
   {% for fx in knockout_fixtures %}
-    <div class="card"><details {% if fx.tip and not fx.played %}open{% endif %}>
+    <div class="card"><details>
       <summary>
         <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
           {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% endif %}
         </span>
-        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b>{% else %} · participants TBD{% endif %}</span>
+        <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · Recommended tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b> <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>{% if fx.market_tip %} <span class="meta">· Market-odds tip: {{ fx.market_tip.home }}–{{ fx.market_tip.away }} (EV {{ "%.2f"|format(fx.market_tip.ev) }})</span>{% endif %}{% else %} · participants TBD{% endif %}</span>
       </summary>
       <div class="fixture-body">
         {% if fx.tip %}
-          <div class="tipline">Recommended tip <span class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</span>
-            <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>
-            {% if fx.market_tip %}<div class="meta">Market-odds tip: <b>{{ fx.market_tip.home }}–{{ fx.market_tip.away }}</b> (EV {{ "%.2f"|format(fx.market_tip.ev) }})</div>{% endif %}</div>
           {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
           <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
         {% else %}

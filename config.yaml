@@ -13,6 +13,20 @@ predictor:
     rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
     host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
     ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
+    alpha: 0.7           # off/def goal-volume weight (0 = pure Elo); see offdef: below + fit-offdef
+
+# Offensive/defensive Elo: per-team att_elo/def_elo (in teams.csv) add the goal-VOLUME
+# dimension a single Elo lacks, blended in via predictor.alpha above. `tippspiel fit-offdef`
+# learns them from tippspiel/data/historical/international_results.csv up to the snapshot date
+# (default: day before first kickoff) with these online-update hyperparameters. All optional —
+# absent, the fitter uses these same defaults.
+offdef:
+  k_att: 0.02            # attack learning rate (per-match log-rate step)
+  k_def: 0.02            # defence learning rate
+  gamma_home: 0.2        # home-venue goal-rate bump used while fitting (non-neutral matches)
+  epochs: 3              # chronological passes over the corpus
+  residual_cap: 5.0      # clamp on a single match's goal residual (dampens blowouts)
+  weights: { friendly: 0.5, qualifier: 2.5, continental: 3.0, world_cup: 4.0, default: 1.0 }
 
 simulation:
   iterations: 50000
@@ -22,6 +36,12 @@ simulation:
 report:
   output_dir: output/
   display_timezone: Europe/Zurich
+
+strategy:
+  # Realistic tips: among scorelines within this many pool-points of the EV optimum, pick the
+  # one nearest the model's expected score. 0 = strict EV (~8% both-teams-score, ~89% shutouts);
+  # 0.15 lifts both-teams-score tips to a realistic ~50% at a negligible (~1.5%) points cost.
+  realism_tolerance: 0.15
 
 tournament:
   name: wc2026
