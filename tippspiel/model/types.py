@@ -17,7 +17,6 @@ class Team:
     team_id: str
     name: str
     elo: float
-    elo_trend: float | None = None
     # Offensive / defensive log-goal-rate deviations from the field average, fitted from
     # historical match goals (``tippspiel/training/offdef_elo.py``; snapshot persisted by
     # ``tippspiel fit-offdef``). Both default to 0.0 — an absent/un-fitted snapshot leaves the

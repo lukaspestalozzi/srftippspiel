@@ -103,7 +103,7 @@ World Champion bonus = 50 points.
 
 | File | Contents |
 |---|---|
-| `teams.csv` | teams: `team_id, name, elo, elo_trend` (+ optional `att_elo, def_elo` from `fit-offdef`) |
+| `teams.csv` | teams: `team_id, name, elo` (+ optional `att_elo, def_elo` from `fit-offdef`) |
 | `fixtures.csv` | all matches. Group rows use concrete teams; knockout rows use concrete teams for a completed event, else structured references — `W:A`/`R:B` (group winner/runner-up), `3RD:74:ABCDF` (a best-third filling slot 74 from the listed groups), `WIN:M101`/`LOSE:M101` (winner/loser of a match). The bracket is derived from these. |
 | `results.csv` | played matches (append rows as the tournament runs; full for a completed event) |
 | `thirds_allocation.json` | *optional* — explicit third-place combination→slot table (FIFA "Annex C"); absent ⇒ constraint-respecting bipartite fallback |
