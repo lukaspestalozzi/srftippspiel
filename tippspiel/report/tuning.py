@@ -35,18 +35,26 @@ _GMAX = 7
 _TUNED_KEYS = ("mu", "k", "rho", "host_elo_bonus", "ko_goal_scale", "alpha")
 
 
+def _lift_fallback(params: dict | None) -> dict:
+    """Flatten a market_odds-shaped params dict: its Elo keys live under fallback_params
+    (top-level keys win on conflict). A flat elo_poisson dict passes through unchanged."""
+    p = dict(params or {})
+    for key, val in (p.pop("fallback_params", {}) or {}).items():
+        p.setdefault(key, val)
+    return p
+
+
 def build_market_grid(base_params: dict | None = None) -> dict:
     """Grid for ``tune --market``: sweep the model x market blend, Elo params pinned.
 
     The Elo axes are single-element lists at the base config's tuned values (sweeping them
     jointly with the blend would square the runtime for little gain — they are already tuned
-    on the same benchmarks); the swept axes are the blend weight, the expansion's assumed
-    total-goals level, and whether the expansion matches the de-vigged draw price.
+    on the same benchmarks); the swept axes are the blend weight (``market_weight``), the
+    expansion's assumed total-goals level (``total_goals``), whether the expansion matches
+    the de-vigged draw price (``match_draw``), and the targeted-blend gate
+    (``divergence_threshold``).
     """
-    p = dict(base_params or {})
-    # A market_odds base config keeps its Elo params under fallback_params; lift them.
-    for key, val in (p.pop("fallback_params", {}) or {}).items():
-        p.setdefault(key, val)
+    p = _lift_fallback(base_params)
     defaults = _default_params(None)
     grid: dict[str, list] = {k: [p.get(k, defaults[k])] for k in _TUNED_KEYS}
     grid.update({
@@ -67,7 +75,9 @@ def _iter_grid(grid: dict[str, list]):
 
 
 def _default_params(base_cfg) -> dict:
-    p = getattr(base_cfg.predictor, "params", {}) if base_cfg else {}
+    # Lift fallback_params so a market_odds base config (Elo keys nested under the fallback)
+    # yields its actual tuned Elo values as the sweep's "default" baseline.
+    p = _lift_fallback(getattr(base_cfg.predictor, "params", {}) if base_cfg else {})
     return {
         "mu": p.get("mu", 2.6),
         "k": p.get("k", 0.0015),

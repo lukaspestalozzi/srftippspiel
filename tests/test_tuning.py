@@ -7,7 +7,13 @@ import pytest
 import tippspiel
 from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
-from tippspiel.report.tuning import _blended_key, _evaluate, build_market_grid, build_tuning
+from tippspiel.report.tuning import (
+    _blended_key,
+    _default_params,
+    _evaluate,
+    build_market_grid,
+    build_tuning,
+)
 
 REPO = Path(tippspiel.__file__).parent.parent
 WOMENSEURO = REPO / "configs" / "womenseuro2025.yaml"
@@ -98,6 +104,16 @@ def test_build_market_grid_pins_elo_axes_and_handles_fallback_params():
                                            "ko_goal_scale", "alpha"))
     assert set(grid["market_weight"]) == {0.0, 0.25, 0.5, 0.75, 1.0}
     assert grid["match_draw"] == [False, True]
+
+
+def test_default_params_lift_fallback_of_market_odds_config():
+    # The live wc2026 config is market_odds with the tuned Elo params nested under
+    # fallback_params; the plain `tune` baseline must reflect those, not the code defaults.
+    cfg = load_config(REPO / "config.yaml")
+    assert cfg.predictor.name == "market_odds"  # guard: the scenario under test
+    d = _default_params(cfg)
+    fb = cfg.predictor.params["fallback_params"]
+    assert d["k"] == fb["k"] and d["rho"] == fb["rho"] and d["alpha"] == fb["alpha"]
 
 
 def test_blended_key_prefers_calibration_then_points():

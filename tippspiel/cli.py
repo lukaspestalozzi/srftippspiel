@@ -265,7 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     tune.add_argument("--top", type=int, default=15, help="leaderboard size (default: 15)")
     tune.add_argument("--market", action="store_true",
                       help="sweep the model x market blend (market_weight/total_goals/"
-                           "match_draw) with the Elo params pinned to the config's values")
+                           "match_draw/divergence_threshold) with the Elo params pinned "
+                           "to the config's values")
     args = parser.parse_args(argv)
 
     config_path = args.config

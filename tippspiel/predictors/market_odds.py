@@ -110,7 +110,8 @@ class MarketOddsPredictor(Predictor):
             if divergence < self.divergence_threshold:
                 return model
         # Odds settle on 90 minutes; lift the goal total for knockout (120-minute) scorelines.
-        # This shifts only exact-scoreline mass, not the L/D/W tendency the expander matches.
+        # The home-vs-away win balance the expander matches is preserved, but the lift does
+        # thin the draw mass (more expected goals -> fewer draws), as 120-minute results show.
         goal_scale = self.ko_goal_scale if match.stage.is_knockout else 1.0
         scoreline = expand_1x2_to_scoreline(
             o.p_home, o.p_draw, o.p_away,
