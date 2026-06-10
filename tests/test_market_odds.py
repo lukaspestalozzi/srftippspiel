@@ -10,7 +10,7 @@ from tippspiel.data.file_provider import FileDataProvider, _devig_proportional
 from tippspiel.model.stages import Stage
 from tippspiel.model.types import Match, Team, TeamRef
 from tippspiel.predictors.elo_poisson import EloPoissonPredictor
-from tippspiel.predictors.expansion import expand_1x2_to_scoreline
+from tippspiel.predictors.expansion import expand_1x2_to_scoreline, pool_log_linear
 from tippspiel.predictors.market_odds import MarketOddsPredictor
 
 
@@ -94,6 +94,101 @@ def test_ko_goal_scale_lifts_knockout_total_only():
     assert total(ko) > total(group)
     # Tendency is unaffected by total-goals scaling (only exact-scoreline mass shifts).
     assert ko.p_home_win() == pytest.approx(group.p_home_win(), abs=0.02)
+
+
+def test_market_weight_one_is_byte_identical_to_pure_market_path():
+    odds = {"M": _devig_proportional(1.5, 4.0, 6.0)}
+    o = odds["M"]
+    p = MarketOddsPredictor(odds=odds, total_goals=2.6, gmax=7)  # default market_weight=1.0
+    direct = expand_1x2_to_scoreline(o.p_home, o.p_draw, o.p_away, total_goals=2.6, gmax=7)
+    assert np.array_equal(p.predict(_match(), _teams()).scoreline.matrix, direct.matrix)
+
+
+def test_market_weight_zero_is_the_fallback():
+    odds = {"M": _devig_proportional(1.5, 4.0, 6.0)}
+    fb = EloPoissonPredictor(gmax=7)
+    p = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7, market_weight=0.0)
+    assert np.array_equal(
+        p.predict(_match(), _teams()).scoreline.matrix,
+        fb.predict(_match(), _teams()).scoreline.matrix,
+    )
+
+
+def test_blend_is_the_normalised_geometric_mean():
+    odds = {"M": _devig_proportional(1.5, 4.0, 6.0)}
+    o = odds["M"]
+    fb = EloPoissonPredictor(gmax=7)
+    p = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7, market_weight=0.5)
+    got = p.predict(_match(), _teams()).scoreline.matrix
+    market = expand_1x2_to_scoreline(o.p_home, o.p_draw, o.p_away, total_goals=2.6, gmax=7)
+    model = fb.predict(_match(), _teams()).scoreline.matrix
+    want = np.sqrt(market.matrix * model)
+    want /= want.sum()
+    assert np.allclose(got, want)
+    # The blend's win probability sits between the two components'.
+    lo = min(market.p_home_win(), float(np.tril(model, -1).sum()))
+    hi = max(market.p_home_win(), float(np.tril(model, -1).sum()))
+    blend_home = float(np.tril(got, -1).sum())
+    assert lo - 1e-9 <= blend_home <= hi + 1e-9
+
+
+def test_blend_falls_back_when_no_odds_regardless_of_weight():
+    fb = EloPoissonPredictor(gmax=7)
+    for w in (0.0, 0.5, 1.0):
+        p = MarketOddsPredictor(odds={}, fallback=fb, gmax=7, market_weight=w)
+        assert np.allclose(
+            p.predict(_match(), _teams()).scoreline.matrix,
+            fb.predict(_match(), _teams()).scoreline.matrix,
+        )
+
+
+def test_market_weight_validated_and_surfaced_in_params():
+    p = MarketOddsPredictor(gmax=7, market_weight=0.25, match_draw=True)
+    assert p.params["market_weight"] == 0.25
+    assert p.params["match_draw"] is True
+    for bad in (-0.1, 1.1):
+        with pytest.raises(ValueError):
+            MarketOddsPredictor(gmax=7, market_weight=bad)
+
+
+def test_pool_log_linear_endpoints_and_normalisation():
+    rng = np.random.default_rng(0)
+    a = rng.random((8, 8))
+    a /= a.sum()
+    b = rng.random((8, 8))
+    b /= b.sum()
+    assert np.allclose(pool_log_linear(a, b, 1.0), a)
+    assert np.allclose(pool_log_linear(a, b, 0.0), b)
+    half = pool_log_linear(a, b, 0.5)
+    assert half.sum() == pytest.approx(1.0)
+    assert (half > 0).all()
+
+
+def test_match_draw_reproduces_full_triple():
+    # With match_draw=True all three de-vigged components are matched, not just the balance.
+    p_home, p_draw, p_away = 0.5, 0.3, 0.2
+    dist = expand_1x2_to_scoreline(p_home, p_draw, p_away, gmax=7, match_draw=True)
+    assert dist.p_home_win() == pytest.approx(p_home, abs=0.02)
+    assert dist.p_draw() == pytest.approx(p_draw, abs=0.02)
+    assert dist.p_away_win() == pytest.approx(p_away, abs=0.02)
+
+
+def test_match_draw_false_unchanged_and_high_draw_price_means_fewer_goals():
+    # Default path byte-identical to the historical fixed-total expansion.
+    legacy = expand_1x2_to_scoreline(0.5, 0.3, 0.2, total_goals=2.6, gmax=7)
+    again = expand_1x2_to_scoreline(0.5, 0.3, 0.2, total_goals=2.6, gmax=7, match_draw=False)
+    assert np.array_equal(legacy.matrix, again.matrix)
+    # A market pricing the draw high implies a tighter (lower-total) match than one pricing
+    # it low, at the same win balance.
+    drawy = expand_1x2_to_scoreline(0.40, 0.35, 0.25, gmax=7, match_draw=True)
+    open_ = expand_1x2_to_scoreline(0.475, 0.20, 0.325, gmax=7, match_draw=True)
+    assert sum(drawy.expected_goals()) < sum(open_.expected_goals())
+
+
+def test_match_draw_goal_scale_lifts_totals_after_the_solve():
+    base = expand_1x2_to_scoreline(0.5, 0.3, 0.2, gmax=7, match_draw=True)
+    lifted = expand_1x2_to_scoreline(0.5, 0.3, 0.2, gmax=7, match_draw=True, goal_scale=1.3)
+    assert sum(lifted.expected_goals()) > sum(base.expected_goals())
 
 
 def test_odds_loader_optional(tmp_path):

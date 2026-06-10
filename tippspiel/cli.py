@@ -97,12 +97,17 @@ def _cmd_verify(cfg, bundle) -> int:
     return 0
 
 
-def _cmd_tune(cfg, benchmark_configs, top: int) -> int:
+def _cmd_tune(cfg, benchmark_configs, top: int, market: bool = False) -> int:
     missing = [p for p in benchmark_configs if not Path(p).exists()]
     if missing:
         print(f"tune: benchmark config(s) not found: {missing}", file=sys.stderr)
         return 2
-    result = run_tuning(cfg, benchmark_configs, top=top)
+    grid = None
+    if market:
+        from .report.tuning import build_market_grid
+
+        grid = build_market_grid(cfg.predictor.params)
+    result = run_tuning(cfg, benchmark_configs, top=top, grid=grid)
     paths, data = result["paths"], result["data"]
     dm, rm = data["default_metrics"], data["recommended_metrics"]
     print(f"tuning written to {paths['markdown']} (+ {paths['json'].name}).")
@@ -258,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="completed-tournament config files to tune against "
                            f"(default: {', '.join(DEFAULT_BENCHMARKS)})")
     tune.add_argument("--top", type=int, default=15, help="leaderboard size (default: 15)")
+    tune.add_argument("--market", action="store_true",
+                      help="sweep the model x market blend (market_weight/total_goals/"
+                           "match_draw) with the Elo params pinned to the config's values")
     args = parser.parse_args(argv)
 
     config_path = args.config
@@ -285,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diagnose":
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
         if args.command == "tune":
-            return _cmd_tune(cfg, args.benchmarks, args.top)
+            return _cmd_tune(cfg, args.benchmarks, args.top, market=args.market)
     except ValueError as exc:
         print(f"{args.command}: {exc}", file=sys.stderr)
         return 1

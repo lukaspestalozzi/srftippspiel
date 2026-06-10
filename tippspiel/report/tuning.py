@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from ..predictors.elo_poisson import EloPoissonPredictor
+from ..predictors.market_odds import MarketOddsPredictor
 from .backtest import build_verification
 from .diagnostics import _fixed_table, _json_default
 
@@ -34,6 +35,28 @@ _GMAX = 7
 _TUNED_KEYS = ("mu", "k", "rho", "host_elo_bonus", "ko_goal_scale", "alpha")
 
 
+def build_market_grid(base_params: dict | None = None) -> dict:
+    """Grid for ``tune --market``: sweep the model x market blend, Elo params pinned.
+
+    The Elo axes are single-element lists at the base config's tuned values (sweeping them
+    jointly with the blend would square the runtime for little gain — they are already tuned
+    on the same benchmarks); the swept axes are the blend weight, the expansion's assumed
+    total-goals level, and whether the expansion matches the de-vigged draw price.
+    """
+    p = dict(base_params or {})
+    # A market_odds base config keeps its Elo params under fallback_params; lift them.
+    for key, val in (p.pop("fallback_params", {}) or {}).items():
+        p.setdefault(key, val)
+    defaults = _default_params(None)
+    grid: dict[str, list] = {k: [p.get(k, defaults[k])] for k in _TUNED_KEYS}
+    grid.update({
+        "market_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
+        "total_goals": [2.4, 2.6, 2.8],
+        "match_draw": [False, True],
+    })
+    return grid
+
+
 def _iter_grid(grid: dict[str, list]):
     keys = list(grid)
     for combo in itertools.product(*(grid[k] for k in keys)):
@@ -52,16 +75,39 @@ def _default_params(base_cfg) -> dict:
     }
 
 
+def _predictor_for(params: dict, odds: dict):
+    """Build the predictor for one param set: pure Elo, or the model x market blend.
+
+    A param set carrying ``market_weight`` selects the blended ``MarketOddsPredictor`` (with
+    the Elo keys feeding its fallback); without it the historical pure-Elo path is unchanged.
+    The predictor is odds-dependent, so it is built per benchmark.
+    """
+    p = dict(params)
+    market_weight = p.pop("market_weight", None)
+    total_goals = p.pop("total_goals", 2.6)
+    match_draw = p.pop("match_draw", False)
+    fallback = EloPoissonPredictor(gmax=_GMAX, **p)
+    if market_weight is None:
+        return fallback
+    return MarketOddsPredictor(
+        odds=odds, fallback=fallback, total_goals=total_goals, gmax=_GMAX,
+        ko_goal_scale=p.get("ko_goal_scale", 1.0),
+        market_weight=market_weight, match_draw=match_draw,
+    )
+
+
 def _evaluate(params: dict, benchmarks: list) -> dict:
     """Aggregate pool points + calibration across all benchmark tournaments for one param set.
 
-    ``benchmarks``: list of ``(bundle, teams, fixtures, results)``.
+    ``benchmarks``: list of ``(bundle, teams, fixtures, results, odds)``. A benchmark without
+    an odds snapshot contributes pure-Elo metrics to a market sweep (the blend degrades to
+    the fallback on every match).
     """
-    predictor = EloPoissonPredictor(gmax=_GMAX, **params)
     n = model = naive = mx = exact = 0
     rps_sum = nll_sum = 0.0
     per_tournament: dict[str, dict] = {}
-    for bundle, teams, fixtures, results in benchmarks:
+    for bundle, teams, fixtures, results, odds in benchmarks:
+        predictor = _predictor_for(params, odds)
         # realism_tolerance is fixed at 0 here: it only shifts pool points (never RPS/NLL), so a
         # swept value would be driven to 0 by the RPS-primary objective. It's set separately.
         _md, data = build_verification(bundle, teams, fixtures, results, predictor,
@@ -167,8 +213,13 @@ def _row(r: dict) -> dict:
 
 
 def _fmt_params(p: dict) -> str:
-    return (f"mu{p['mu']} k{p['k']} rho{p['rho']} "
-            f"host{int(p['host_elo_bonus'])} ko{p['ko_goal_scale']} a{p.get('alpha', 0.0)}")
+    s = (f"mu{p.get('mu', 2.6)} k{p.get('k', 0.0015)} rho{p.get('rho', 0.0)} "
+         f"host{int(p.get('host_elo_bonus', 0))} ko{p.get('ko_goal_scale', 1.0)} "
+         f"a{p.get('alpha', 0.0)}")
+    if p.get("market_weight") is not None:
+        # Market-blend axes; absent on pure-Elo rows of a mixed leaderboard.
+        s += f" mw{p['market_weight']} tg{p['total_goals']} dr{int(bool(p['match_draw']))}"
+    return s
 
 
 def _render(data: dict) -> str:
@@ -180,7 +231,7 @@ def _render(data: dict) -> str:
     d, r = data["default_metrics"], data["recommended_metrics"]
     L.append("## Default vs recommended")
     L.append(_fixed_table(
-        ["set", "mu/k/rho/host/ko/a", "mean RPS", "mean NLL", "model", "%max", "exact"],
+        ["set", "params", "mean RPS", "mean NLL", "model", "%max", "exact"],
         [
             ["default", _fmt_params(data["default_params"]), f"{d['mean_rps']:.4f}",
              f"{d['mean_nll']:.4f}", d["model"], f"{d['model_pct']:.1f}", d["exact_hits"]],
@@ -201,7 +252,7 @@ def _render(data: dict) -> str:
               f"{row['mean_nll']:.4f}", row["model"], f"{row['model_pct']:.1f}", row["exact_hits"]]
              for i, row in enumerate(data["leaderboard"])]
     L.append(_fixed_table(
-        ["#", "mu/k/rho/host/ko/a", "mean RPS", "mean NLL", "model", "%max", "exact"], lrows))
+        ["#", "params", "mean RPS", "mean NLL", "model", "%max", "exact"], lrows))
     L.append("")
     L.append("## Leave-one-tournament-out (generalisation check)")
     L.append("Params chosen on the other two tournaments, scored on the held-out one.")
