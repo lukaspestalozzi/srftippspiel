@@ -223,4 +223,7 @@ wc2022 (+12 group pts), is given back on womenseuro2025/euro2020, and euro2024 n
 the gate. The live-use argument (current odds carry lineup/team news a pre-tournament Elo
 can't have; on wc2026 the 0.15 gate fires on 10 of 44 odds-backed fixtures and changes 4
 tips) is plausible but unprovable from archives, so enabling it on the live config is a
-user call, not a data-driven default.
+user call, not a data-driven default. **User decision 2026-06-10: enabled on the live
+wc2026 `config.yaml`** (`market_odds` with `mw 0.5, match_draw, dt 0.15`, tuned Elo params
+as `fallback_params`); the completed-benchmark configs stay `elo_poisson` so `verify`/`tune`
+baselines remain pure-Elo.

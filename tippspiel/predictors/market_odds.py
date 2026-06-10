@@ -74,6 +74,13 @@ class MarketOddsPredictor(Predictor):
             )
 
     @property
+    def alpha(self) -> float:
+        """The off/def volume weight actually in play — the fallback's (the market path has no
+        Elo inputs). Surfaced so report/diagnostic off/def displays gate correctly when this
+        wrapper is the active predictor."""
+        return float(getattr(self.fallback, "alpha", 0.0))
+
+    @property
     def params(self) -> dict:
         return {
             "total_goals": self.total_goals,
