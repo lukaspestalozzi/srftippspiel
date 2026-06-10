@@ -65,6 +65,9 @@ model beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`
 (`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
 tie-break on pool-points % of max; it also reports a leave-one-tournament-out generalisation
 check. The current `config.yaml` params are the tuned result. Code: `tippspiel/report/tuning.py`.
+`tippspiel tune --market` instead sweeps the model×market blend axes (`market_weight`,
+`total_goals`, `match_draw`) with the Elo params pinned to the config's values, loading each
+benchmark's committed `odds.csv` (a benchmark without one contributes pure-Elo metrics).
 Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lifts the knockout
 goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
 advantage applies when a team plays in its own country (`venue_country == home.team_id`).
@@ -104,8 +107,10 @@ whenever a new question recurs (code: `tippspiel/report/diagnostics.py`).
 It contains: run/config header; **predictor-behaviour** stats (recommended-tip frequency,
 tendency split, EV-component breakdown, optimal-vs-naive gap, plain-English interpretation
 notes); an **offensive/defensive Elo** section (most attack- vs defence-minded sides, rating
-extremes, att/def-vs-Elo correlation); a **per-fixture table** (L/D/W, top-3 cells, recommended
-vs naive tip + EV split); **simulation diagnostics** (invariants, title odds, group
+extremes, att/def-vs-Elo correlation); a **model-vs-market value check** (pure-model 1X2 vs the
+de-vigged market per odds-backed fixture, Bächinger-style "WERT" flags where the model exceeds
+the market by >7pp, mean-gap drift alarm); a **per-fixture table** (L/D/W, top-3 cells,
+recommended vs naive tip + EV split); **simulation diagnostics** (invariants, title odds, group
 qualification); **bonus calibration** vs `historical_stats.py`; and an **automated
 PASS/WARN/FAIL anomaly block**.
 
@@ -123,6 +128,10 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
 - `tippspiel/predictors/` — `EloPoissonPredictor` (Phase-1/2) and `MarketOddsPredictor`
   (Phase-3): de-vigged bookmaker 1X2 odds expanded to a scoreline (`expansion.py`) where an
   `odds.csv` snapshot supplies them, falling back to Elo for every other (and synthetic) matchup.
+  `market_weight` (0..1, default 1 = pure market) log-linearly pools the odds-implied and Elo
+  matrices cell-wise where odds exist — the model×market ensemble; `match_draw: true` makes the
+  expansion also match the de-vigged draw price (solving the per-match total-goals level via a
+  nested bisection) instead of assuming `total_goals`.
 - `tippspiel/strategy/` — `expected_points.py` (`ExpectedPointsStrategy`, the EV optimiser;
   `ev_components()` is the reusable EV breakdown; `best_tip()` takes a `realism_tolerance`) and
   `bonus.py` (bonus questions).
@@ -183,8 +192,24 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
 ## Phase status
 
 Phase 1 (group tips + report) and Phase 2 (Monte Carlo engine + bonus questions) are
-implemented. Phase 3 is now implemented: `MarketOddsPredictor` (de-vigged 1X2 odds → scoreline, Elo
-fallback; activated per tournament via an `odds.csv` snapshot + `predictor.name: market_odds`,
-and surfaced as the report's per-fixture "Market-odds tip"). Committing sourced pre-tournament
-`odds.csv` snapshots for the `verify` benchmarks is the data step that quantifies the lift
-(RPS/NLL/pool-points vs the Elo baseline); the engine seam itself is complete and tested.
+implemented. Phase 3 is implemented and measurable: `MarketOddsPredictor` (de-vigged 1X2 odds →
+scoreline, Elo fallback; activated per tournament via an `odds.csv` snapshot +
+`predictor.name: market_odds`, surfaced as the report's per-fixture "Market-odds tip"), plus the
+Bächinger-style extensions: a tunable **model×market blend** (`market_weight`), a
+**draw-matching expansion** (`match_draw`), and the diagnostic **model-vs-market value check**.
+ESPN-sourced `odds.csv` snapshots are committed for 4 of the 5 `verify` benchmarks
+(womenseuro2025, wc2022, euro2024, euro2020) and wc2026; **wc2018 has none** (ESPN's archive
+returns nothing that far back — sourcing it manually, e.g. archived oddsportal exports via
+`odds_adapter.convert_odds_export`, is an open optional task). `tippspiel tune --market` sweeps
+the blend axes with the Elo params pinned. **Leak caveat:** the archived odds cover knockout
+matches priced *after* the group stage, so when comparing market-blend vs pure-Elo backtests,
+the **group-stage split** of `verify`'s calibration metrics is the leak-clean comparison (the
+Elo snapshot is strictly pre-tournament; the KO odds are not).
+
+**Measured (2026-06, 5 benchmarks):** the best blend (`market_weight 0.5, match_draw: true`)
+improves pooled calibration slightly (RPS 0.1897→0.1886, NLL 2.842→2.810) but **costs pool
+points** (1493→1459, 45.2%→44.2% of max), and the leak-clean group-only RPS split is mixed
+(better on womenseuro2025/wc2022, worse on euro2024/euro2020). Even with the KO-odds leak
+favouring the market, the gain doesn't clear the bar — so **all configs stay on
+`elo_poisson`**; the blend knobs remain available and re-measurable as more odds snapshots
+land (full numbers: `output/tune.{md,json}` from `tune --market`).
