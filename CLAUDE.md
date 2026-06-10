@@ -213,3 +213,14 @@ points** (1493→1459, 45.2%→44.2% of max), and the leak-clean group-only RPS 
 favouring the market, the gain doesn't clear the bar — so **all configs stay on
 `elo_poisson`**; the blend knobs remain available and re-measurable as more odds snapshots
 land (full numbers: `output/tune.{md,json}` from `tune --market`).
+
+**Targeted variant (`divergence_threshold`, measured 2026-06):** gate the blend to fixtures
+where the model's 1X2 diverges from the de-vigged market by more than the threshold on some
+outcome (pure model elsewhere). At `dt 0.15, mw 0.5, match_draw` it fixes the untargeted
+blend's points loss (overall 1498 vs Elo's 1493; group-only leak-clean 882 vs 879, RPS ~flat)
+— i.e. **neutral on the backtests, not a measured win**: the gain concentrates on shock-heavy
+wc2022 (+12 group pts), is given back on womenseuro2025/euro2020, and euro2024 never crosses
+the gate. The live-use argument (current odds carry lineup/team news a pre-tournament Elo
+can't have; on wc2026 the 0.15 gate fires on 10 of 44 odds-backed fixtures and changes 4
+tips) is plausible but unprovable from archives, so enabling it on the live config is a
+user call, not a data-driven default.
