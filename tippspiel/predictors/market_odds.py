@@ -14,6 +14,14 @@ model x market mix, with the weight tunable against the backtests (``tippspiel t
 --market``). ``match_draw`` switches the expansion to also match the de-vigged draw price
 (solving the total-goals level per match instead of assuming a fixed one).
 
+``divergence_threshold`` makes the blend *targeted*: a fixture keeps the pure model
+prediction unless the model's 1X2 diverges from the de-vigged market by more than the
+threshold on some outcome (the diagnostic value-check's ``max |delta|``), in which case the
+blend (or pure market, at ``market_weight=1``) takes over. The rationale: the market mostly
+agrees with a calibrated model, and where it disagrees *sharply* it usually knows something
+(lineups, injuries, squad quality a slow rating misses) — so only those fixtures defer to
+it. ``0.0`` (default) disables the gate and blends every odds-backed fixture as before.
+
 Odds are injected at construction as a ``dict[match_id, Odds1X2]`` rather than added to the
 frozen ``Match`` dataclass, so the ``Predictor.predict(match, teams)`` interface is unchanged.
 """
@@ -40,6 +48,7 @@ class MarketOddsPredictor(Predictor):
         ko_goal_scale: float = 1.0,
         market_weight: float = 1.0,
         match_draw: bool = False,
+        divergence_threshold: float = 0.0,
     ) -> None:
         self.odds = dict(odds or {})
         self.fallback = fallback if fallback is not None else EloPoissonPredictor(gmax=gmax)
@@ -50,6 +59,11 @@ class MarketOddsPredictor(Predictor):
             raise ValueError(f"market_weight must be in [0, 1], got {market_weight}")
         self.market_weight = market_weight
         self.match_draw = match_draw
+        if not 0.0 <= divergence_threshold <= 1.0:
+            raise ValueError(
+                f"divergence_threshold must be in [0, 1], got {divergence_threshold}"
+            )
+        self.divergence_threshold = divergence_threshold
         # The simulator reads predictor.gmax to size one flat CDF shared across both the
         # market and fallback paths; a mismatch would silently corrupt sampling.
         fb_gmax = getattr(self.fallback, "gmax", None)
@@ -67,6 +81,7 @@ class MarketOddsPredictor(Predictor):
             "ko_goal_scale": self.ko_goal_scale,
             "market_weight": self.market_weight,
             "match_draw": self.match_draw,
+            "divergence_threshold": self.divergence_threshold,
             "n_odds": len(self.odds),
             "fallback": getattr(self.fallback, "params", {}),
         }
@@ -75,6 +90,18 @@ class MarketOddsPredictor(Predictor):
         o = self.odds.get(match.match_id)
         if o is None or self.market_weight <= 0.0:
             return self.fallback.predict(match, teams)
+        model = None
+        if self.market_weight < 1.0 or self.divergence_threshold > 0.0:
+            model = self.fallback.predict(match, teams)
+        if self.divergence_threshold > 0.0:
+            dist = model.scoreline
+            divergence = max(
+                abs(dist.p_home_win() - o.p_home),
+                abs(dist.p_draw() - o.p_draw),
+                abs(dist.p_away_win() - o.p_away),
+            )
+            if divergence < self.divergence_threshold:
+                return model
         # Odds settle on 90 minutes; lift the goal total for knockout (120-minute) scorelines.
         # This shifts only exact-scoreline mass, not the L/D/W tendency the expander matches.
         goal_scale = self.ko_goal_scale if match.stage.is_knockout else 1.0
@@ -84,9 +111,8 @@ class MarketOddsPredictor(Predictor):
             match_draw=self.match_draw, goal_scale=goal_scale,
         )
         if self.market_weight < 1.0:
-            model = self.fallback.predict(match, teams).scoreline
             scoreline = ScorelineDistribution(
-                pool_log_linear(scoreline.matrix, model.matrix, self.market_weight)
+                pool_log_linear(scoreline.matrix, model.scoreline.matrix, self.market_weight)
             )
         return MatchPrediction(
             match_id=match.match_id,

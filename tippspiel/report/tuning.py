@@ -53,6 +53,9 @@ def build_market_grid(base_params: dict | None = None) -> dict:
         "market_weight": [0.0, 0.25, 0.5, 0.75, 1.0],
         "total_goals": [2.4, 2.6, 2.8],
         "match_draw": [False, True],
+        # Targeted blend: 0 = blend every odds-backed fixture; >0 keeps the pure model unless
+        # the model-vs-market 1X2 gap exceeds the threshold on some outcome.
+        "divergence_threshold": [0.0, 0.25],
     })
     return grid
 
@@ -86,6 +89,7 @@ def _predictor_for(params: dict, odds: dict):
     market_weight = p.pop("market_weight", None)
     total_goals = p.pop("total_goals", 2.6)
     match_draw = p.pop("match_draw", False)
+    divergence_threshold = p.pop("divergence_threshold", 0.0)
     fallback = EloPoissonPredictor(gmax=_GMAX, **p)
     if market_weight is None:
         return fallback
@@ -93,6 +97,7 @@ def _predictor_for(params: dict, odds: dict):
         odds=odds, fallback=fallback, total_goals=total_goals, gmax=_GMAX,
         ko_goal_scale=p.get("ko_goal_scale", 1.0),
         market_weight=market_weight, match_draw=match_draw,
+        divergence_threshold=divergence_threshold,
     )
 
 
@@ -219,6 +224,8 @@ def _fmt_params(p: dict) -> str:
     if p.get("market_weight") is not None:
         # Market-blend axes; absent on pure-Elo rows of a mixed leaderboard.
         s += f" mw{p['market_weight']} tg{p['total_goals']} dr{int(bool(p['match_draw']))}"
+        if p.get("divergence_threshold"):
+            s += f" dt{p['divergence_threshold']}"
     return s
 
 

@@ -151,6 +151,51 @@ def test_market_weight_validated_and_surfaced_in_params():
             MarketOddsPredictor(gmax=7, market_weight=bad)
 
 
+def test_divergence_gate_keeps_model_when_market_agrees():
+    fb = EloPoissonPredictor(gmax=7)
+    model = fb.predict(_match(), _teams()).scoreline
+    # Market priced exactly at the model's own L/D/W -> zero divergence -> pure model.
+    odds = {"M": Odds1X2(p_home=model.p_home_win(), p_draw=model.p_draw(),
+                         p_away=model.p_away_win())}
+    p = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7,
+                            market_weight=1.0, divergence_threshold=0.2)
+    got = p.predict(_match(), _teams())
+    assert np.array_equal(got.scoreline.matrix, model.matrix)
+    assert got.predictor_name == fb.name  # the model's prediction, untouched
+
+
+def test_divergence_gate_defers_to_market_on_large_gap():
+    fb = EloPoissonPredictor(gmax=7)
+    # Model favours the 1800-Elo home side; the market prices a heavy away favourite.
+    odds = {"M": _devig_proportional(8.0, 5.0, 1.30)}
+    p = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7,
+                            market_weight=1.0, divergence_threshold=0.2)
+    got = p.predict(_match(), _teams()).scoreline
+    o = odds["M"]
+    direct = expand_1x2_to_scoreline(o.p_home, o.p_draw, o.p_away, total_goals=2.6, gmax=7)
+    assert np.array_equal(got.matrix, direct.matrix)
+    # And with a partial weight the gated fixture gets the blend, not the pure market.
+    p_blend = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7,
+                                  market_weight=0.5, divergence_threshold=0.2)
+    blended = p_blend.predict(_match(), _teams()).scoreline.matrix
+    model = fb.predict(_match(), _teams()).scoreline.matrix
+    want = np.sqrt(direct.matrix * model)
+    assert np.allclose(blended, want / want.sum())
+
+
+def test_divergence_threshold_zero_blends_everywhere_and_is_validated():
+    fb = EloPoissonPredictor(gmax=7)
+    odds = {"M": _devig_proportional(2.0, 3.3, 3.5)}  # near the model's view
+    gate_off = MarketOddsPredictor(odds=odds, fallback=fb, gmax=7, market_weight=1.0)
+    assert gate_off.divergence_threshold == 0.0
+    o = odds["M"]
+    direct = expand_1x2_to_scoreline(o.p_home, o.p_draw, o.p_away, total_goals=2.6, gmax=7)
+    assert np.array_equal(gate_off.predict(_match(), _teams()).scoreline.matrix, direct.matrix)
+    assert gate_off.params["divergence_threshold"] == 0.0
+    with pytest.raises(ValueError):
+        MarketOddsPredictor(gmax=7, divergence_threshold=1.5)
+
+
 def test_pool_log_linear_endpoints_and_normalisation():
     rng = np.random.default_rng(0)
     a = rng.random((8, 8))
