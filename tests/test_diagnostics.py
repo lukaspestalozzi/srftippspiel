@@ -44,10 +44,11 @@ def test_markdown_has_all_sections(diag):
         "# Claude Diagnostic Report",
         "## 2. Predictor behaviour",
         "## 3. Offensive / defensive Elo",
-        "## 4. Per-fixture detail",
-        "## 5. Simulation diagnostics",
-        "## 6. Bonus-question diagnostics",
-        "## 7. Validation / anomaly summary",
+        "## 4. Model vs market (value check)",
+        "## 5. Per-fixture detail",
+        "## 6. Simulation diagnostics",
+        "## 7. Bonus-question diagnostics",
+        "## 8. Validation / anomaly summary",
     ):
         assert header in md
 
@@ -84,6 +85,46 @@ def test_json_sidecar_round_trips(diag, tmp_path):
     loaded = json.loads(paths["json"].read_text())
     assert loaded["meta"]["simulated"] is True
     assert loaded["fixtures"] and loaded["anomalies"]
+
+
+def test_market_section_absent_without_odds(diag):
+    # The module fixture passes no odds -> section unavailable, gracefully noted.
+    assert diag["data"]["market"] == {"available": False}
+    assert "model-vs-market comparison unavailable" in diag["md"]
+
+
+def test_market_section_compares_model_to_devigged_odds():
+    from tippspiel.data.base import Odds1X2
+    from tippspiel.data.file_provider import _devig_proportional
+
+    cfg, bundle, teams, fixtures, _ = _load()
+    predictor = build_predictor(cfg)
+    strategy = build_strategy(cfg, bundle)
+    preds = _predict_tippable(fixtures, teams, set(), predictor)
+    tipset = strategy.generate_tips(preds, None, fixtures)
+    # Synthetic odds for two tippable fixtures: one agreeing with the model, one heavily
+    # skewed against it (the away long-shot priced as a strong favourite -> home "value").
+    mids = sorted(set(preds))[:2]
+    agree = preds[mids[0]].scoreline
+    odds = {
+        mids[0]: Odds1X2(p_home=agree.p_home_win(), p_draw=agree.p_draw(),
+                         p_away=agree.p_away_win()),
+        mids[1]: _devig_proportional(15.0, 8.0, 1.1),
+    }
+    _md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, None,
+                                  predictor, odds=odds)
+    market = data["market"]
+    assert market["available"] is True and market["n_compared"] == 2
+    rows = {r["match_id"]: r for r in market["fixtures"]}
+    assert rows[mids[0]]["max_abs_delta"] == pytest.approx(0.0, abs=1e-9)
+    assert rows[mids[0]]["value_outcomes"] == []
+    # The skewed fixture: model sees far more home probability than the market's price.
+    assert rows[mids[1]]["delta"]["home"] > 0.07
+    assert "home" in rows[mids[1]]["value_outcomes"]
+    assert market["top_divergences"][0]["match_id"] == mids[1]
+    # The big divergence drives the mean gap over the WARN bar with only 2 fixtures.
+    assert any(a["name"] == "model vs market 1X2 gap" for a in data["anomalies"])
+    assert "## 4. Model vs market (value check)" in _md and "Largest divergences" in _md
 
 
 def test_no_sim_mode_degrades_gracefully():

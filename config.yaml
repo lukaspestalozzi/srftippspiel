@@ -2,18 +2,28 @@
 # select another with --config configs/<name>.yaml.
 
 predictor:
-  name: elo_poisson
-  # Tuned against the completed-tournament backtests via `tippspiel tune` (blended
-  # calibration + pool-points objective): sharper favourites (k), a negative Dixon-Coles
-  # term that lifts draws over 1:0/0:1 (rho), and a knockout goal-scale for the 120-min results.
+  # Targeted model x market blend (user-enabled 2026-06-10): pure Elo-Poisson everywhere,
+  # except odds-backed fixtures where the model's 1X2 diverges from the de-vigged market by
+  # > divergence_threshold on some outcome — there the market is pooled in at market_weight.
+  # Backtest-neutral (see CLAUDE.md "Targeted variant"); enabled for live use because current
+  # odds carry lineup/team news a pre-tournament Elo snapshot cannot. Elo params below are
+  # the `tippspiel tune` result and feed the fallback unchanged.
+  name: market_odds
   params:
-    mu: 2.6
-    k: 0.002
+    market_weight: 0.5         # market share of the log-linear pool on gated fixtures
+    match_draw: true           # expansion also matches the de-vigged draw price
+    divergence_threshold: 0.15 # gate: pure model below this model-vs-market 1X2 gap
+    total_goals: 2.6           # expansion's assumed total when match_draw is false
     gmax: 7
-    rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
-    host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
-    ko_goal_scale: 1.2   # knockout goal-rate multiplier (results are the 120-minute scoreline)
-    alpha: 0.7           # off/def goal-volume weight (0 = pure Elo); see offdef: below + fit-offdef
+    ko_goal_scale: 1.2         # knockout goal-rate multiplier (results are the 120-minute scoreline)
+    fallback_params:
+      mu: 2.6
+      k: 0.002
+      gmax: 7
+      rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
+      host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
+      ko_goal_scale: 1.2
+      alpha: 0.7           # off/def goal-volume weight (0 = pure Elo); see offdef: below + fit-offdef
 
 # Offensive/defensive Elo: per-team att_elo/def_elo (in teams.csv) add the goal-VOLUME
 # dimension a single Elo lacks, blended in via predictor.alpha above. `tippspiel fit-offdef`
@@ -48,7 +58,7 @@ tournament:
   display_name: FIFA World Cup 2026
   completed: false        # not yet played; results.csv is conditioned on as it fills
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "eloratings.net snapshot ~5 June 2026 (men)"
+  elo_source: "eloratings.net snapshot 10 June 2026 (men; includes the 5-9 June pre-WC friendlies)"
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. An explicit third-place combination->slot table can be added

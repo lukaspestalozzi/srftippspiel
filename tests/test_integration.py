@@ -75,6 +75,22 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     assert len(result["tipset"].tips) == 72
 
 
+def _with_alpha(cfg, alpha):
+    """Set the off/def volume weight regardless of config shape: top-level params for
+    elo_poisson, nested fallback_params for the market_odds wrapper."""
+    p = dict(cfg.predictor.params)
+    if "fallback_params" in p:
+        p["fallback_params"] = {**p["fallback_params"], "alpha": alpha}
+    else:
+        p["alpha"] = alpha
+    return dataclasses.replace(cfg, predictor=dataclasses.replace(cfg.predictor, params=p))
+
+
+def _alpha_of(cfg) -> float:
+    p = cfg.predictor.params
+    return p.get("fallback_params", p).get("alpha", p.get("alpha", 0.0))
+
+
 def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
     # The pool report surfaces each team's att/def + goal-volume effect when the predictor
     # actually uses them (alpha>0), and hides the row entirely when alpha=0.
@@ -85,9 +101,7 @@ def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
     assert "Attack / defence" in html_on
     assert "goal-volume layer" in html_on  # the one-time legend
 
-    off = dataclasses.replace(
-        on, predictor=dataclasses.replace(on.predictor, params={**on.predictor.params, "alpha": 0.0})
-    )
+    off = _with_alpha(on, 0.0)
     ctx_off = run_pipeline(off, BUNDLE, simulate=False)["context"]
     html_off = Path(write_report(off, ctx_off)).read_text()
     assert "Attack / defence" not in html_off
@@ -108,7 +122,7 @@ def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
         cfg = dataclasses.replace(
             small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
         )
-        assert cfg.predictor.params["alpha"] > 0  # guard: the config does enable off/def
+        assert _alpha_of(cfg) > 0  # guard: the config does enable off/def
         ctx = run_pipeline(cfg, BUNDLE, simulate=False)["context"]
     finally:
         FileDataProvider.get_teams = orig

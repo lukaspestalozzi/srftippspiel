@@ -29,6 +29,8 @@ from ..strategy.bonus import build_bonus_questions
 from ..strategy.expected_points import ev_components, expected_points
 
 _LOW_CLUSTER_WARN = 0.70   # WARN if 1:0/0:1/1:1 exceed this share of recommended tips
+_VALUE_FLAG = 0.07         # flag a 1X2 outcome where the model exceeds the market by this much
+_MARKET_DIVERGENCE_WARN = 0.12  # WARN if the mean |model - market| 1X2 gap exceeds this
 _TITLE_SUM_TOL = 0.01
 _QUALIFY_SUM_TOL = 0.05
 _MATRIX_SUM_TOL = 1e-6
@@ -205,6 +207,58 @@ def _offdef_section(teams, predictor) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- model vs market
+def _market_section(fixtures, teams, predictions, predictor, odds) -> dict:
+    """Model vs de-vigged market 1X2 — the Bächinger-style "value" (WERT) check.
+
+    The model side is always the *pure* model (the blend's Elo fallback when the active
+    predictor is ``market_odds``), so this stays a genuine model-vs-market comparison even
+    when the recommended tips already mix the market in. Per odds-backed tippable fixture it
+    reports both L/D/W triples, the per-outcome delta, and flags outcomes where the model
+    sees ``> _VALUE_FLAG`` more probability than the market ("value" under the model). The
+    mean absolute gap doubles as a drift alarm on the model's calibration vs the market.
+    """
+    if not odds:
+        return {"available": False}
+    model = getattr(predictor, "fallback", predictor)
+    by_id = {m.match_id: m for m in fixtures}
+    rows = []
+    for mid in predictions:
+        match = by_id.get(mid)
+        o = odds.get(mid)
+        if match is None or o is None or not match.participants_known:
+            continue
+        dist = model.predict(match, teams).scoreline
+        model_ldw = {"home": dist.p_home_win(), "draw": dist.p_draw(), "away": dist.p_away_win()}
+        market_ldw = {"home": o.p_home, "draw": o.p_draw, "away": o.p_away}
+        delta = {k: model_ldw[k] - market_ldw[k] for k in model_ldw}
+        rows.append({
+            "match_id": mid,
+            "tie": f"{match.home.team_id}-{match.away.team_id}",
+            "model": model_ldw,
+            "market": market_ldw,
+            "delta": delta,
+            "max_abs_delta": max(abs(v) for v in delta.values()),
+            "value_outcomes": sorted(k for k, v in delta.items() if v > _VALUE_FLAG),
+        })
+    if not rows:
+        return {"available": False}
+    n = len(rows)
+    mean_abs = {k: sum(abs(r["delta"][k]) for r in rows) / n for k in ("home", "draw", "away")}
+    overall = sum(mean_abs.values()) / 3.0
+    rows.sort(key=lambda r: r["max_abs_delta"], reverse=True)
+    return {
+        "available": True,
+        "model_name": getattr(model, "name", "?"),
+        "n_compared": n,
+        "mean_abs_delta": mean_abs,
+        "mean_abs_delta_overall": overall,
+        "n_value_flags": sum(1 for r in rows if r["value_outcomes"]),
+        "top_divergences": rows[:5],
+        "fixtures": sorted(rows, key=lambda r: r["match_id"]),
+    }
+
+
 # --------------------------------------------------------------------------- simulation
 def _simulation_section(outcome, teams, fixtures) -> dict | None:
     if outcome is None:
@@ -294,7 +348,7 @@ def _bonus_section(bundle, teams, outcome) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- anomalies
-def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
+def _anomaly_checks(predictions, records, pb, sim, bonus, market=None) -> list[dict]:
     checks = []
 
     bad_matrix = sum(1 for p in predictions.values()
@@ -333,6 +387,14 @@ def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
                    "detail": f"1:0/0:1/1:1 share {low:.0%} (warn > {_LOW_CLUSTER_WARN:.0%}); "
                              f"expected behaviour, flagged so a regression is visible"})
 
+    if market and market.get("available"):
+        gap = market["mean_abs_delta_overall"]
+        checks.append({"name": "model vs market 1X2 gap",
+                       "status": "WARN" if gap > _MARKET_DIVERGENCE_WARN else "PASS",
+                       "detail": f"mean |model - market| {gap:.3f} over "
+                                 f"{market['n_compared']} odds-backed fixtures "
+                                 f"(warn > {_MARKET_DIVERGENCE_WARN})"})
+
     for b in bonus:
         if b.get("available") and b["status"] != "INFO":
             checks.append({"name": f"bonus calibration: {b['id']}",
@@ -341,7 +403,7 @@ def _anomaly_checks(predictions, records, pb, sim, bonus) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- markdown
-def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) -> str:
+def _render_markdown(meta, pb, notes, offdef, market, records, sim, bonus, anomalies) -> str:
     L = []
     L.append("# Claude Diagnostic Report")
     L.append("")
@@ -437,8 +499,44 @@ def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) ->
         ))
     L.append("")
 
-    # 4. Per-fixture detail
-    L.append("## 4. Per-fixture detail")
+    # 4. Model vs market (value check)
+    L.append("## 4. Model vs market (value check)")
+    L.append("")
+    if not market.get("available"):
+        L.append("_No bookmaker odds loaded (no `odds.csv` for this tournament, or none of the "
+                 "odds-backed fixtures are tippable); model-vs-market comparison unavailable._")
+    else:
+        L.append(f"Pure-model (`{market['model_name']}`) 1X2 vs the de-vigged market over "
+                 f"{market['n_compared']} odds-backed fixtures. `value` flags outcomes where "
+                 f"the model sees > {_VALUE_FLAG:.0%} more probability than the market — "
+                 f"either the model knows something or (more often) it is miscalibrated there.")
+        L.append("")
+        ma = market["mean_abs_delta"]
+        L.append(_fixed_table(
+            ["metric", "value"],
+            [["mean |delta| home/draw/away",
+              f"{ma['home']:.3f} / {ma['draw']:.3f} / {ma['away']:.3f}"],
+             ["mean |delta| overall", f"{market['mean_abs_delta_overall']:.3f}"],
+             ["fixtures with a value flag",
+              f"{market['n_value_flags']} of {market['n_compared']}"]],
+        ))
+        L.append("")
+        L.append("### Largest divergences")
+
+        def _ldw_fmt(d):
+            return "/".join(f"{d[k]:.0%}".rstrip("%") for k in ("home", "draw", "away"))
+
+        rows = []
+        for r in market["top_divergences"]:
+            rows.append([r["match_id"], r["tie"], _ldw_fmt(r["model"]), _ldw_fmt(r["market"]),
+                         f"{r['max_abs_delta']:.2f}",
+                         ",".join(r["value_outcomes"]) or "-"])
+        L.append(_fixed_table(["match", "tie", "model LDW", "market LDW", "max |d|", "value"],
+                              rows))
+    L.append("")
+
+    # 5. Per-fixture detail
+    L.append("## 5. Per-fixture detail")
     rows = []
     for r in records:
         ldw = "/".join(f"{x:.0%}".rstrip("%") for x in r["ldw"])
@@ -457,8 +555,8 @@ def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) ->
     ))
     L.append("")
 
-    # 5. Simulation diagnostics
-    L.append("## 5. Simulation diagnostics")
+    # 6. Simulation diagnostics
+    L.append("## 6. Simulation diagnostics")
     if sim is None:
         L.append("_Simulation skipped (--no-sim); advancement/title/bonus-sim sections unavailable._")
     else:
@@ -481,8 +579,8 @@ def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) ->
             L.append(f"- **{letter}**: {line}")
     L.append("")
 
-    # 6. Bonus diagnostics
-    L.append("## 6. Bonus-question diagnostics")
+    # 7. Bonus diagnostics
+    L.append("## 7. Bonus-question diagnostics")
     for b in bonus:
         L.append("")
         L.append(f"### {b['label']} (`{b['id']}`)")
@@ -497,8 +595,8 @@ def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) ->
         ))
     L.append("")
 
-    # 7. Validation / anomaly summary
-    L.append("## 7. Validation / anomaly summary")
+    # 8. Validation / anomaly summary
+    L.append("## 8. Validation / anomaly summary")
     L.append(_fixed_table(
         ["check", "status", "detail"],
         [[a["name"], a["status"], a["detail"]] for a in anomalies],
@@ -513,15 +611,17 @@ def _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies) ->
 
 
 # --------------------------------------------------------------------------- entrypoint
-def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor):
+def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset, outcome,
+                      predictor, odds=None):
     """Return ``(markdown, data)`` for the Claude diagnostic report."""
     records = _fixture_records(fixtures, teams, predictions, tipset)
     pb = _predictor_behaviour(records)
     notes = _behaviour_notes(pb)
     offdef = _offdef_section(teams, predictor)
+    market = _market_section(fixtures, teams, predictions, predictor, odds or {})
     sim = _simulation_section(outcome, teams, fixtures)
     bonus = _bonus_section(bundle, teams, outcome)
-    anomalies = _anomaly_checks(predictions, records, pb, sim, bonus)
+    anomalies = _anomaly_checks(predictions, records, pb, sim, bonus, market)
     meta = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "git_head": _git_head(),
@@ -541,12 +641,13 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
         "meta": meta,
         "predictor_behaviour": pb_notes,
         "offdef": offdef,
+        "market": market,
         "fixtures": records,
         "simulation": sim,
         "bonus": bonus,
         "anomalies": anomalies,
     }
-    markdown = _render_markdown(meta, pb, notes, offdef, records, sim, bonus, anomalies)
+    markdown = _render_markdown(meta, pb, notes, offdef, market, records, sim, bonus, anomalies)
     return markdown, data
 
 

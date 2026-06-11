@@ -127,7 +127,9 @@ def _market_predictions(
 
     Runs a dedicated ``MarketOddsPredictor`` *regardless of the configured predictor*, over the
     **full** tippable slate (Elo fallback where a fixture has no odds row). Display is gated to
-    genuine-odds fixtures separately. Empty when no odds exist at all.
+    genuine-odds fixtures separately. Empty when no odds exist at all. Deliberately kept at the
+    pure-market default (``market_weight=1``): this line is the report's market *reference*;
+    a blended copy would just shadow the recommended tip.
     """
     if not odds:
         return {}
@@ -139,6 +141,7 @@ def _market_predictions(
         total_goals=p.get("total_goals", 2.6),
         gmax=gmax,
         ko_goal_scale=p.get("ko_goal_scale", 1.0),
+        match_draw=bool(p.get("match_draw", False)),
     )
     return _predict_tippable(fixtures, teams, played, predictor)
 
@@ -166,6 +169,7 @@ def write_diagnostics(cfg: Config, bundle: TournamentBundle, *, simulate: bool) 
     markdown, data = build_diagnostics(
         cfg, bundle, core["teams"], core["fixtures"], core["results"],
         core["predictions"], core["tipset"], core["outcome"], core["predictor"],
+        odds=core["odds"],
     )
     paths = DiagnosticsWriter().write(markdown, data, cfg.report.output_dir)
     return {"paths": paths, "data": data}
@@ -199,11 +203,14 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     benchmarks = []
     for cfg_path in benchmark_configs:
         bundle = load_tournament(cfg_path)
-        provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+        provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+                                    odds_file=bundle.odds_file)
         teams = {t.team_id: t for t in provider.get_teams()}
         fixtures = provider.get_fixtures()
         results = {r.match_id: r for r in provider.get_results()}
-        benchmarks.append((bundle, teams, fixtures, results))
+        # Odds enable the model x market blend axes (`tune --market`); empty when the
+        # tournament has no committed snapshot (the sweep then degrades to pure Elo there).
+        benchmarks.append((bundle, teams, fixtures, results, provider.get_odds()))
     markdown, data = build_tuning(base_cfg, benchmarks, grid=grid, top=top)
     paths = TuningWriter().write(markdown, data, base_cfg.report.output_dir)
     return {"paths": paths, "data": data}
