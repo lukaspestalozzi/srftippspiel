@@ -43,7 +43,7 @@ offdef:
   snapshot_date: "2026-06-13"
 
 simulation:
-  iterations: 50000
+  iterations: 500000   # max per-team MC standard error = 0.5/sqrt(n) ~= 0.07pp; ~30s/run
   seed: 20260611
   penalty_model: coin_flip   # coin_flip | elo_weighted
 
