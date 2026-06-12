@@ -196,32 +196,14 @@ Team codes are eloratings' own two-letter codes (mostly ISO-3166: `MX` Mexico, `
 guessing. Use `latest.tsv` to confirm a match was processed and lift the **new ratings**
 (cols 11-12) straight into `teams.csv`.
 
-**Lag caveat:** the feed updates only after eloratings processes a match — typically same-day, but
-a game that finished hours ago may not be in `latest.tsv` yet (matchday 1: MEX–RSA was in the feed
-the next morning; KOR–CZE, finished ~04:00Z, was not). For an unprocessed match, apply
-eloratings.net's own published formula to the committed pre-match ratings (auditable and exactly
-reproducible — the formula's output matched the feed's processed MEX–RSA row to the point), then
-re-verify against the feed on the next refresh:
-
-```
-new = old + K · G · (W − We)
-We  = 1 / (10^(−dr/400) + 1)           # expected result for the team
-dr  = own_rating − opp_rating + H      # H = +100 for the home team, 0 at a neutral venue
-W   = 1 win / 0.5 draw / 0 loss
-G   = 1 (goal diff ≤ 1) · 1.5 (gd 2) · 1.75 (gd 3) · 1.75+(gd−3)/8 (gd ≥ 4)
-K   = 60 World Cup · 50 continental final · 40 WC/continental qualifier · 20 friendly
-```
-
-Host advantage `H` applies when a team plays in its own country (a host nation), **not** for a
-neutral-venue match between two visitors. Round to the nearest integer; the two sides exchange
-equal and opposite points. Once the feed catches up, `latest.tsv` cols 11-12 are the ground truth —
-if a computed value disagrees with a processed row, the feed wins.
-
-Worked example (WC2026 matchday 1):
-- **MEX 2–0 RSA** (gd 2 → G=1.5; Mexico host → H=+100): MEX 1875→**1881**, RSA 1517→**1511**.
-- **KOR 2–1 CZE** (gd 1 → G=1; neutral): KOR 1758→**1786**, CZE 1740→**1712**.
-
-Then:
+**Lag caveat — do NOT compute Elo yourself.** The feed updates only after eloratings processes a
+match — typically same-day, but a game that finished hours ago may not be in `latest.tsv`/`World.tsv`
+yet (matchday 1: MEX–RSA was in the feed the next morning; KOR–CZE, finished ~04:00Z, was not). If a
+played match has **not** been processed yet, leave that team's `elo` at its **last fetched value**
+(the committed snapshot) and move on — do not apply the eloratings formula to estimate it. Eloratings
+is the single source of truth for the rating; an estimated value would diverge from it (their model
+folds in factors beyond the headline K·G·(W−We), and a later-corrected score or competition code
+would compound the drift). Re-run the fetch on the next refresh and pick up the real value then.
 
 1. **Edit the movers' `elo` in `teams.csv`** in place; update `tournament.elo_source` in the config
    to the new snapshot date + what changed.
