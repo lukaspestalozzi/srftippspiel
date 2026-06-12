@@ -1,13 +1,37 @@
 ---
 name: update-odds
 description: >-
-  Refresh or add bookmaker odds (odds.csv) for a tippspiel tournament from ESPN's
-  public odds feed, so the report's "Market-odds tip" line populates with real
-  market data. Use when the user wants to update/refresh odds, add odds for a new
-  or in-progress tournament, fill in newly-posted WC2026 matches, or fix/regenerate
-  an odds.csv. Covers the ESPN JSON endpoints, the espn_odds_fetch maintainer tool,
-  per-tournament league slugs, validation, and the known gotchas.
+  Refresh a live tippspiel tournament's data after a matchday: the played-match
+  results (results.csv), the bookmaker odds (odds.csv, from ESPN's public feed), and
+  the Elo ratings (teams.csv base elo + fitted att/def). Use when the user wants to
+  update/refresh odds, add the latest results, update Elo after games are played,
+  fill in newly-posted WC2026 matches, or otherwise bring a live tournament's inputs
+  up to date. Covers sourcing results from the web, the ESPN JSON endpoints +
+  espn_odds_fetch tool, the eloratings.net update formula, re-running fit-offdef,
+  validation, and the known gotchas.
 ---
+
+# Update live-tournament data (results, odds, Elo)
+
+When a matchday has been played in a **live** tournament (e.g. `wc2026`, `completed: false`),
+three input files need refreshing, in this order:
+
+1. **`results.csv`** — add the full-time scores of the games that have kicked off.
+2. **`odds.csv`** — re-fetch market odds (newly-priced upcoming matches appear; played ones drop).
+3. **`teams.csv`** Elo — bump the base `elo` of the teams that played, then re-run `fit-offdef`.
+
+Sourcing convention (decided 2026-06): **fetch the real-world data from the web** (results via
+search, odds via the ESPN feed below, Elo via the eloratings.net formula), and for Elo update the
+**base `elo` and re-run `fit-offdef`** so att/def shift too. Never invent numbers — every value
+must trace to a fetched source or the published eloratings formula.
+
+The report already renders a played match with its **pre-match prediction (tip, forecast, data
+table) plus the actual result added** — so once `results.csv` is updated, no report change is
+needed; played matches keep showing "as before" with the real score layered on
+(`tippspiel/pipeline.py` `_fixture_block`, `report.html.j2`).
+
+The detailed odds machinery is below; the **results** and **Elo** procedures are in
+"Results" and "Elo" near the end.
 
 # Update the odds data
 
@@ -119,6 +143,76 @@ Elo in `teams.csv`.
 - Optional: confirm the backtest still behaves with
   `build_verification(...)` under `predictor.name=market_odds` vs `elo_poisson` (compare
   `calibration.all.mean_rps`).
+
+## Results (results.csv)
+
+`results.csv` (`match_id,home_goals,away_goals,winner_team_id`) lists the games already played; the
+engine **conditions** on them (the simulator uses the actual scoreline; the report shows them with
+their pre-match tip). Schema: group matches leave `winner_team_id` **blank**; it is only needed for
+a knockout decided by penalties (the 120-minute scoreline goes in the goal columns, the
+shootout winner's `team_id` in the last column). Goals are the **full-time 90-minute** score for
+group games.
+
+Procedure:
+
+1. **Find which fixtures have kicked off.** Read `fixtures.csv` and compare each `kickoff_utc` to
+   the current time. Only add matches whose kickoff has genuinely passed — adding a not-yet-played
+   match injects future info into the sim.
+2. **Fetch each full-time score from the web** and **dual-source** it (e.g. ESPN + FIFA/CNN) before
+   writing — this is the one place a transcription error silently propagates into standings.
+3. **Orient home/away to the fixture.** Match the fixture's `home_ref`/`away_ref`; write
+   `home_goals` as the repo home team's goals. Append the row(s) to `results.csv`.
+
+Example (WC2026 matchday 1): `G_A_1` Mexico 2–0 South Africa → `G_A_1,2,0,` and `G_A_2`
+South Korea 2–1 Czechia → `G_A_2,2,1,`.
+
+## Elo (teams.csv base elo + att/def)
+
+After a matchday only the teams that **played** have moved on eloratings.net; the rest are
+unchanged from the committed snapshot. Don't rewrite all 48 rows — update just the movers, in
+place, preserving the `att_elo`/`def_elo` columns.
+
+**eloratings.net is JavaScript-rendered, so `WebFetch` returns an empty shell — you cannot scrape
+it.** Instead apply eloratings.net's own published formula to the committed pre-match rating
+(auditable, and exactly reproducible):
+
+```
+new = old + K · G · (W − We)
+We  = 1 / (10^(−dr/400) + 1)           # expected result for the team
+dr  = own_rating − opp_rating + H      # H = +100 for the home team, 0 at a neutral venue
+W   = 1 win / 0.5 draw / 0 loss
+G   = 1 (goal diff ≤ 1) · 1.5 (gd 2) · 1.75 (gd 3) · 1.75+(gd−3)/8 (gd ≥ 4)
+K   = 60 World Cup · 50 continental final · 40 WC/continental qualifier · 20 friendly
+```
+
+Host advantage `H` applies when a team plays in its own country (a host nation), **not** for a
+neutral-venue match between two visitors. Round to the nearest integer; the two sides exchange
+equal and opposite points. Sanity-check against any post-match value you *can* find (the
+eloratings 2026.tsv export sometimes returns updated numbers — corroborate, don't rely on it).
+
+Worked example (WC2026 matchday 1):
+- **MEX 2–0 RSA** (gd 2 → G=1.5; Mexico host → H=+100): MEX 1875→**1881**, RSA 1517→**1511**.
+- **KOR 2–1 CZE** (gd 1 → G=1; neutral): KOR 1758→**1786**, CZE 1740→**1712**.
+
+Then:
+
+1. **Edit the movers' `elo` in `teams.csv`** in place; update `tournament.elo_source` in the config
+   to the new snapshot date + what changed.
+2. **Re-run `fit-offdef` so att/def reflect the games.** The fitter is deterministic for a fixed
+   corpus+snapshot, so it only moves if the corpus grows: the WC2026 fixtures already sit in
+   `tippspiel/data/historical/international_results.csv` as future rows with `NA,NA` scores (the
+   adapter drops `NA`), so **fill in the played matches' scores there** (find the rows by date/teams
+   — note the corpus uses full names like "Czech Republic"), and set `offdef.snapshot_date` in the
+   config to a date **after** them (the default snapshot = day-before-first-kickoff is for
+   leak-free *backtests*; a live tournament is not a benchmark, so fold the played games in). Run
+   `tippspiel fit-offdef` to rewrite `att_elo`/`def_elo` for all teams.
+
+```bash
+tippspiel fit-offdef          # after editing teams.csv elo + corpus scores + offdef.snapshot_date
+tippspiel validate-data       # schema/consistency
+tippspiel run                 # regenerate output/report.html; eyeball played matches
+pytest -q && ruff check tippspiel tests
+```
 
 ## Gotchas & known limits
 

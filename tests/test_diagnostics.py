@@ -32,7 +32,7 @@ def diag():
     strategy = build_strategy(cfg, bundle)
     outcome = TournamentSimulator(fixtures, teams, {}, predictor, prov.get_thirds_allocation(),
                                   iterations=3000, seed=7).run()
-    preds = _predict_tippable(fixtures, teams, set(), predictor)
+    preds = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(preds, outcome, fixtures)
     md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, outcome, predictor)
     return {"md": md, "data": data, "n_tippable": len(preds)}
@@ -66,7 +66,7 @@ def test_low_scoreline_behaviour_is_explained():
     cfg, bundle, teams, fixtures, prov = _load()
     predictor = build_predictor(cfg)
     strict = ExpectedPointsStrategy(bundle.bonus_questions, realism_tolerance=0.0)
-    preds = _predict_tippable(fixtures, teams, set(), predictor)
+    preds = _predict_tippable(fixtures, teams, predictor)
     tipset = strict.generate_tips(preds, None, fixtures)
     _md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, None, predictor)
     notes = " ".join(data["predictor_behaviour"]["notes"]).lower()
@@ -100,7 +100,7 @@ def test_market_section_compares_model_to_devigged_odds():
     cfg, bundle, teams, fixtures, _ = _load()
     predictor = build_predictor(cfg)
     strategy = build_strategy(cfg, bundle)
-    preds = _predict_tippable(fixtures, teams, set(), predictor)
+    preds = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(preds, None, fixtures)
     # Synthetic odds for two tippable fixtures: one agreeing with the model, one heavily
     # skewed against it (the away long-shot priced as a strong favourite -> home "value").
@@ -131,7 +131,7 @@ def test_no_sim_mode_degrades_gracefully():
     cfg, bundle, teams, fixtures, _ = _load()
     predictor = build_predictor(cfg)
     strategy = build_strategy(cfg, bundle)
-    preds = _predict_tippable(fixtures, teams, set(), predictor)
+    preds = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(preds, None, fixtures)
     md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, None, predictor)
     assert data["simulation"] is None

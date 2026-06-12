@@ -54,13 +54,17 @@ def build_strategy(cfg: Config, bundle: TournamentBundle) -> ExpectedPointsStrat
 def _predict_tippable(
     fixtures: list[Match],
     teams: dict[str, Team],
-    played: set[str],
     predictor: Predictor,
 ) -> dict[str, MatchPrediction]:
-    """Predict every fixture that has concrete participants and is not yet played."""
+    """Predict every fixture with concrete participants — *including already-played ones*.
+
+    A played match's prediction is never consumed by the simulator (which conditions on the
+    actual ``results`` scoreline) or by tip scoring; it exists only so the report can keep
+    showing the a-priori tip/distribution alongside the real result.
+    """
     preds: dict[str, MatchPrediction] = {}
     for m in fixtures:
-        if m.match_id in played or not m.participants_known:
+        if not m.participants_known:
             continue
         preds[m.match_id] = predictor.predict(m, teams)
     return preds
@@ -82,7 +86,6 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
-    played = set(results)
     odds = provider.get_odds()
 
     predictor = build_predictor(cfg, odds=odds)
@@ -104,9 +107,9 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
         )
         outcome = sim.run()
 
-    predictions = _predict_tippable(fixtures, teams, played, predictor)
+    predictions = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(predictions, outcome, fixtures)
-    market_predictions = _market_predictions(cfg, fixtures, teams, played, odds)
+    market_predictions = _market_predictions(cfg, fixtures, teams, odds)
 
     return {
         "teams": teams, "fixtures": fixtures, "results": results,
@@ -120,7 +123,6 @@ def _market_predictions(
     cfg: Config,
     fixtures: list[Match],
     teams: dict[str, Team],
-    played: set[str],
     odds: dict[str, Odds1X2],
 ) -> dict[str, MatchPrediction]:
     """Market-odds scoreline predictions for the report's per-fixture market tips.
@@ -143,7 +145,7 @@ def _market_predictions(
         ko_goal_scale=p.get("ko_goal_scale", 1.0),
         match_draw=bool(p.get("match_draw", False)),
     )
-    return _predict_tippable(fixtures, teams, played, predictor)
+    return _predict_tippable(fixtures, teams, predictor)
 
 
 def run_pipeline(
@@ -379,7 +381,8 @@ def _fixture_block(
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
-        return block
+    # Build the prediction block even for played matches, so the report keeps showing the
+    # a-priori tip/distribution next to the real result (added above).
     pred = predictions.get(m.match_id)
     if pred is None:
         return block

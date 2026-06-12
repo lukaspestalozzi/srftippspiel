@@ -99,13 +99,14 @@
       </summary>
       <div class="fixture-body">
         {% if fx.played %}
-          <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}.</p>
-        {% else %}
-          {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
-          <div class="grid2">
-            <div>{{ fx.ldw_chart | safe }}</div>
-            <div>{{ fx.heatmap | safe }}</div>
-          </div>
+          <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}. (Tip and forecast below are the pre-match prediction.)</p>
+        {% endif %}
+        {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
+        {% if fx.ldw_chart %}
+        <div class="grid2">
+          <div>{{ fx.ldw_chart | safe }}</div>
+          <div>{{ fx.heatmap | safe }}</div>
+        </div>
         {% endif %}
       </div>
     </details></div>
@@ -127,10 +128,13 @@
         <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · Recommended tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b> <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>{% if fx.market_tip %} <span class="meta">· Market-odds tip: {{ fx.market_tip.home }}–{{ fx.market_tip.away }} (EV {{ "%.2f"|format(fx.market_tip.ev) }})</span>{% endif %}{% else %} · participants TBD{% endif %}</span>
       </summary>
       <div class="fixture-body">
+        {% if fx.played %}
+          <p class="played">Played — actual result {{ fx.result.home_goals }}–{{ fx.result.away_goals }}. (Tip and forecast below are the pre-match prediction.)</p>
+        {% endif %}
         {% if fx.tip %}
           {% if fx.data %}{{ fixture_data(fx.data) }}{% endif %}
           <div class="grid2"><div>{{ fx.ldw_chart | safe }}</div><div>{{ fx.heatmap | safe }}</div></div>
-        {% else %}
+        {% elif not fx.played %}
           <p class="meta">{{ fx.slot_note }}</p>
           {% if fx.occupants_chart %}{{ fx.occupants_chart | safe }}{% endif %}
         {% endif %}
