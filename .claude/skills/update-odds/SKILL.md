@@ -7,8 +7,9 @@ description: >-
   update/refresh odds, add the latest results, update Elo after games are played,
   fill in newly-posted WC2026 matches, or otherwise bring a live tournament's inputs
   up to date. Covers sourcing results from the web, the ESPN JSON endpoints +
-  espn_odds_fetch tool, the eloratings.net update formula, re-running fit-offdef,
-  validation, and the known gotchas.
+  espn_odds_fetch tool, the eloratings.net TSV data feed (World.tsv / latest.tsv)
+  with the update formula as fallback, re-running fit-offdef, validation, and the
+  known gotchas.
 ---
 
 # Update live-tournament data (results, odds, Elo)
@@ -21,7 +22,7 @@ three input files need refreshing, in this order:
 3. **`teams.csv`** Elo — bump the base `elo` of the teams that played, then re-run `fit-offdef`.
 
 Sourcing convention (decided 2026-06): **fetch the real-world data from the web** (results via
-search, odds via the ESPN feed below, Elo via the eloratings.net formula), and for Elo update the
+search, odds via the ESPN feed below, Elo via the eloratings.net TSV feed), and for Elo update the
 **base `elo` and re-run `fit-offdef`** so att/def shift too. Never invent numbers — every value
 must trace to a fetched source or the published eloratings formula.
 
@@ -172,9 +173,35 @@ After a matchday only the teams that **played** have moved on eloratings.net; th
 unchanged from the committed snapshot. Don't rewrite all 48 rows — update just the movers, in
 place, preserving the `att_elo`/`def_elo` columns.
 
-**eloratings.net is JavaScript-rendered, so `WebFetch` returns an empty shell — you cannot scrape
-it.** Instead apply eloratings.net's own published formula to the committed pre-match rating
-(auditable, and exactly reproducible):
+**Fetch the ratings from eloratings.net's TSV data feed.** The site's HTML is JavaScript-rendered
+(fetching a page URL returns an empty shell), but the JS loads plain tab-separated files that are
+directly fetchable with a browser `User-Agent` — the same trick as the ESPN feed:
+
+```bash
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+# Current ratings, one row per team (no header): col1 rank, col3 team code, col4 CURRENT RATING
+curl -sS -A "$UA" "https://www.eloratings.net/World.tsv" \
+  | awk -F'\t' '$3=="MX"||$3=="ZA"||$3=="KR"||$3=="CZ"{print $3, $4}'
+# Recent matches with the Elo exchange applied (no header):
+#   cols 1-3 date (Y M D) · 4-5 home/away team code · 6-7 goals · 8 competition (WC, F, …)
+#   · 9 host code (blank = home team hosts) · 10 POINTS EXCHANGED · 11-12 NEW home/away rating
+#   · 13-14 rank change · 15-16 new rank
+curl -sS -A "$UA" "https://www.eloratings.net/latest.tsv" | head -20
+```
+
+Other useful files on the same host: `<year>.tsv` (that year's rating table, e.g. `2026.tsv`),
+`<year>_results.tsv` (all matches of a year), `en.teams.tsv` (team code → name(s), with aliases).
+Team codes are eloratings' own two-letter codes (mostly ISO-3166: `MX` Mexico, `ZA` South Africa,
+`KR` South Korea, `CZ` Czechia, `EN` England, `PT` Portugal…) — map via `en.teams.tsv`, not by
+guessing. Use `latest.tsv` to confirm a match was processed and lift the **new ratings**
+(cols 11-12) straight into `teams.csv`.
+
+**Lag caveat:** the feed updates only after eloratings processes a match — typically same-day, but
+a game that finished hours ago may not be in `latest.tsv` yet (matchday 1: MEX–RSA was in the feed
+the next morning; KOR–CZE, finished ~04:00Z, was not). For an unprocessed match, apply
+eloratings.net's own published formula to the committed pre-match ratings (auditable and exactly
+reproducible — the formula's output matched the feed's processed MEX–RSA row to the point), then
+re-verify against the feed on the next refresh:
 
 ```
 new = old + K · G · (W − We)
@@ -187,8 +214,8 @@ K   = 60 World Cup · 50 continental final · 40 WC/continental qualifier · 20 
 
 Host advantage `H` applies when a team plays in its own country (a host nation), **not** for a
 neutral-venue match between two visitors. Round to the nearest integer; the two sides exchange
-equal and opposite points. Sanity-check against any post-match value you *can* find (the
-eloratings 2026.tsv export sometimes returns updated numbers — corroborate, don't rely on it).
+equal and opposite points. Once the feed catches up, `latest.tsv` cols 11-12 are the ground truth —
+if a computed value disagrees with a processed row, the feed wins.
 
 Worked example (WC2026 matchday 1):
 - **MEX 2–0 RSA** (gd 2 → G=1.5; Mexico host → H=+100): MEX 1875→**1881**, RSA 1517→**1511**.
