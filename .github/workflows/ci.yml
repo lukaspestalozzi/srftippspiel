@@ -149,10 +149,12 @@ jobs:
           path: artifacts
       - name: Assemble site
         run: python -m tippspiel.report.site --artifacts artifacts --out site --commit "${{ github.sha }}"
+      # One-time setup: Pages must be enabled manually in the repo settings
+      # (Settings -> Pages -> Build and deployment -> Source: "GitHub Actions").
+      # The API can't do it from here: creating the Pages site needs
+      # administration:write, which GITHUB_TOKEN cannot be granted.
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
