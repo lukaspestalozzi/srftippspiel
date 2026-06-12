@@ -10,6 +10,7 @@ import tippspiel
 from tippspiel.config import load_config, load_tournament
 from tippspiel.model.types import Result
 from tippspiel.pipeline import run_pipeline, write_report
+from tippspiel.strategy.expected_points import score_tip
 
 REPO = Path(tippspiel.__file__).parent.parent
 BUNDLE = load_tournament(REPO / "config.yaml")
@@ -182,6 +183,13 @@ def test_played_match_still_predicted_for_display(small_cfg):
     assert block["played"] is True
     assert block["result"] == {"home_goals": 1, "away_goals": 0}
     assert block["tip"] is not None and block["data"] is not None
+    # ... plus the likelihood hint for the actual result and the tip's accuracy against it.
+    assert block["actual"]["label"] in {"expected", "plausible", "surprising"}
+    assert 0.0 <= block["actual"]["p_exact"] <= block["actual"]["p_tendency"] <= 1.0
+    tip = result["tipset"].tips["G_A_1"]
+    assert block["tip_outcome"]["points"] == score_tip(tip.tip_home, tip.tip_away, 1, 0, 1)
+    assert block["tip_outcome"]["max"] == 10
+    assert block["tip_outcome"]["cls"] in {"exact", "tendency", "miss"}
 
 
 def test_fixture_block_carries_underlying_data(small_cfg):
@@ -211,6 +219,11 @@ def test_fixture_block_carries_underlying_data(small_cfg):
             mp = d["market_probs"]
             assert mp["home"] + mp["draw"] + mp["away"] == pytest.approx(1.0)
         assert len(d["top3"]) == 3
+        # Likelihood hint + accuracy tag exist exactly for played fixtures.
+        if f["played"]:
+            assert f["actual"] is not None and f["tip_outcome"] is not None
+        else:
+            assert f["actual"] is None and f["tip_outcome"] is None
 
 
 def test_fixture_data_elo_omitted_for_placeholder():
@@ -234,3 +247,40 @@ def test_fixture_data_elo_omitted_for_placeholder():
     assert data["elo"] is None
     assert data["rec_components"] is not None
     assert data["market_probs"] is None
+
+
+def test_actual_likelihood_labels_and_out_of_grid():
+    import numpy as np
+
+    from tippspiel.model.scoreline import ScorelineDistribution
+    from tippspiel.pipeline import _actual_likelihood
+
+    mat = np.zeros((3, 3))
+    mat[1, 0] = 0.60  # 1-0
+    mat[0, 1] = 0.25  # 0-1
+    mat[0, 0] = 0.15  # 0-0
+    dist = ScorelineDistribution(mat)
+
+    hint = _actual_likelihood(dist, 1, 0)
+    assert hint == {"p_exact": pytest.approx(0.60), "p_tendency": pytest.approx(0.60),
+                    "label": "expected"}
+    # The label keys off the tendency probability, at the documented boundaries.
+    assert _actual_likelihood(dist, 0, 1)["label"] == "plausible"   # 0.25, inclusive boundary
+    assert _actual_likelihood(dist, 0, 0)["label"] == "surprising"  # 0.15
+    # A result beyond the distribution grid: zero exact probability, no crash.
+    freak = _actual_likelihood(dist, 7, 3)
+    assert freak["p_exact"] == 0.0
+    assert freak["p_tendency"] == pytest.approx(0.60)
+
+
+def test_tip_outcome_tags():
+    from tippspiel.pipeline import _tip_outcome
+
+    assert _tip_outcome(2, 1, 2, 1, 1) == {"points": 10, "max": 10, "label": "exact hit",
+                                           "cls": "exact"}
+    t = _tip_outcome(2, 1, 3, 1, 1)  # right tendency (5) + away goals (1)
+    assert (t["label"], t["cls"], t["points"], t["max"]) == ("correct tendency", "tendency", 6, 10)
+    # KO weight doubles; a tipped win vs a 120-minute draw is a tendency miss
+    # (still 2 pts for the matching home-goal count).
+    assert _tip_outcome(1, 0, 1, 1, 2) == {"points": 2, "max": 20, "label": "miss",
+                                           "cls": "miss"}
