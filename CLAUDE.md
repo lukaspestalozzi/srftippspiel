@@ -136,8 +136,12 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
   `ev_components()` is the reusable EV breakdown; `best_tip()` takes a `realism_tolerance`) and
   `bonus.py` (bonus questions).
 - `tippspiel/simulation/` — vectorised NumPy `TournamentSimulator` + standings/thirds/bracket.
-- `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report) and
-  `diagnostics.py` (my report).
+- `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report),
+  `diagnostics.py` (my report), and `site.py` — the static-site assembler behind CI's
+  `publish` job (GitHub Pages, <https://lukaspestalozzi.github.io/srftippspiel/>): landing
+  page + live `run` report + per-benchmark `predict` report & `verify` backtest. Deploys on
+  push to `main` **and on ready (non-draft) PRs** (one site per repo — a PR deploy replaces
+  the live site until the next `main` deploy; that's deliberate, for pre-merge checks).
 - `tippspiel/pipeline.py` — orchestration. `_run_core(cfg, bundle, ...)` returns the raw
   objects shared by all reports; `run_pipeline()`/`write_diagnostics()`/`write_verification()`
   build the HTML report / diagnostic / backtest respectively.

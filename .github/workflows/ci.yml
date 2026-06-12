@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # The defaults plus ready_for_review, so flipping a draft PR to ready triggers the
+    # publish job (it deploys from ready PRs as well as main; see below).
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   test:
@@ -47,6 +50,29 @@ jobs:
             args: diagnose
             artifact: diagnose-report
             path: output/diagnostic.md
+          # A-priori tips report for each completed tournament (predict, not run — the
+          # bracket is fixed, nothing to simulate; see simulation/bracket.py). Published
+          # to the site next to that tournament's backtest.
+          - name: predict-womenseuro2025
+            args: predict --config configs/womenseuro2025.yaml
+            artifact: predict-report-womenseuro2025
+            path: output/report.html
+          - name: predict-wc2022
+            args: predict --config configs/wc2022.yaml
+            artifact: predict-report-wc2022
+            path: output/report.html
+          - name: predict-euro2024
+            args: predict --config configs/euro2024.yaml
+            artifact: predict-report-euro2024
+            path: output/report.html
+          - name: predict-wc2018
+            args: predict --config configs/wc2018.yaml
+            artifact: predict-report-wc2018
+            path: output/report.html
+          - name: predict-euro2020
+            args: predict --config configs/euro2020.yaml
+            artifact: predict-report-euro2020
+            path: output/report.html
           # Predictor-accuracy backtest against a completed tournament.
           - name: verify-womenseuro2025
             args: verify --config configs/womenseuro2025.yaml
@@ -87,3 +113,52 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.path }}
           if-no-files-found: error
+
+  publish:
+    name: Publish reports to GitHub Pages
+    needs: artifacts
+    # Deploy from main and from ready (non-draft) PRs — the latter lets a branch be
+    # checked on the live URL before merging. Pages serves one site per repo, so a PR
+    # deploy replaces the live site until the next deploy from main.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e .
+      - name: Download report artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Assemble site
+        run: python -m tippspiel.report.site --artifacts artifacts --out site --commit "${{ github.sha }}"
+      # One-time setup: Pages must be enabled manually in the repo settings
+      # (Settings -> Pages -> Build and deployment -> Source: "GitHub Actions").
+      # The API can't do it from here: creating the Pages site needs
+      # administration:write, which GITHUB_TOKEN cannot be granted.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -27,7 +27,7 @@ def convert_odds_export(
     with a mapping are emitted. Raw decimal odds are passed through unchanged.
     """
     rows_out = []
-    with Path(src).open(newline="") as fh:
+    with Path(src).open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             key = (row.get(key_col) or "").strip()
             match_id = match_id_map.get(key)
@@ -43,7 +43,7 @@ def convert_odds_export(
             )
 
     fieldnames = ["match_id", "odds_home", "odds_draw", "odds_away"]
-    with Path(out_path).open("w", newline="") as fh:
+    with Path(out_path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows_out)

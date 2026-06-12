@@ -120,13 +120,13 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
     """Fetch ESPN odds for ``tournament``'s fixtures and write ``odds.csv``. Returns rows written."""
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = {}
-    with (tdir / "teams.csv").open(newline="") as fh:
+    with (tdir / "teams.csv").open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             teams[_norm(row["name"])] = row["team_id"]
 
     # Fixtures we want odds for: real, dated group/known matches keyed by team pair + date.
     fixtures = []
-    with (tdir / "fixtures.csv").open(newline="") as fh:
+    with (tdir / "fixtures.csv").open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             ko = row.get("kickoff_utc", "")
             home, away = row.get("home_ref", ""), row.get("away_ref", "")
@@ -179,7 +179,7 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
         })
 
     out = Path(out_path) if out_path else (tdir / "odds.csv")
-    with out.open("w", newline="") as fh:
+    with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=["match_id", "odds_home", "odds_draw", "odds_away"])
         writer.writeheader()
         writer.writerows(rows_out)
