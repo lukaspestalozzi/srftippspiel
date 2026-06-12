@@ -23,12 +23,12 @@ COMPLETED = [b for b in BUNDLES if b.completed]
 def artifacts(tmp_path):
     art = tmp_path / "artifacts"
     (art / "run-report").mkdir(parents=True)
-    (art / "run-report" / "report.html").write_text("<html>live report</html>")
+    (art / "run-report" / "report.html").write_text("<html>live report</html>", encoding="utf-8")
     for b in COMPLETED:
         (art / f"predict-report-{b.name}").mkdir()
-        (art / f"predict-report-{b.name}" / "report.html").write_text(f"<html>{b.name}</html>")
+        (art / f"predict-report-{b.name}" / "report.html").write_text(f"<html>{b.name}</html>", encoding="utf-8")
         (art / f"verify-{b.name}").mkdir()
-        (art / f"verify-{b.name}" / "verify.md").write_text(f"# {b.name}\n<pre> & raw md")
+        (art / f"verify-{b.name}" / "verify.md").write_text(f"# {b.name}\n<pre> & raw md", encoding="utf-8")
     return art
 
 
@@ -36,9 +36,9 @@ def test_site_layout(artifacts, tmp_path):
     out = tmp_path / "site"
     written = build_site(artifacts, out, commit="abc123def456789")
     assert (out / "index.html").is_file()
-    assert (out / LIVE.name / "index.html").read_text() == "<html>live report</html>"
+    assert (out / LIVE.name / "index.html").read_text(encoding="utf-8") == "<html>live report</html>"
     for b in COMPLETED:
-        assert (out / b.name / "report.html").read_text() == f"<html>{b.name}</html>"
+        assert (out / b.name / "report.html").read_text(encoding="utf-8") == f"<html>{b.name}</html>"
         assert (out / b.name / "backtest.html").is_file()
     assert set(written) == {p for p in out.rglob("*") if p.is_file()}
 
@@ -46,7 +46,7 @@ def test_site_layout(artifacts, tmp_path):
 def test_index_links_every_tournament(artifacts, tmp_path):
     out = tmp_path / "site"
     build_site(artifacts, out, commit="abc123def456789")
-    index = (out / "index.html").read_text()
+    index = (out / "index.html").read_text(encoding="utf-8")
     assert f'href="{LIVE.name}/"' in index and html.escape(LIVE.display_name) in index
     for b in COMPLETED:
         assert f'href="{b.name}/report.html"' in index
@@ -58,7 +58,7 @@ def test_index_links_every_tournament(artifacts, tmp_path):
 def test_verify_markdown_is_escaped_in_pre(artifacts, tmp_path):
     out = tmp_path / "site"
     build_site(artifacts, out)
-    page = (out / COMPLETED[0].name / "backtest.html").read_text()
+    page = (out / COMPLETED[0].name / "backtest.html").read_text(encoding="utf-8")
     assert "&lt;pre&gt; &amp; raw md" in page
     assert "<pre> & raw md" not in page  # the raw markdown must never land unescaped
 

@@ -288,7 +288,7 @@ def write_offdef_snapshot(bundle: TournamentBundle, offdef_block: dict | None = 
 
 def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
     """Rewrite teams.csv with att_elo/def_elo columns appended, preserving existing columns."""
-    with open(teams_file, newline="") as fh:
+    with open(teams_file, newline="", encoding="utf-8") as fh:
         reader = _csv.DictReader(fh)
         fieldnames = list(reader.fieldnames or [])
         rows = list(reader)
@@ -301,7 +301,7 @@ def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
         if r is not None:
             row["att_elo"] = f"{r.att:.4f}"
             row["def_elo"] = f"{r.def_:.4f}"
-    with open(teams_file, "w", newline="") as fh:
+    with open(teams_file, "w", newline="", encoding="utf-8") as fh:
         writer = _csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)

@@ -137,13 +137,14 @@ def build_site(artifacts: Path, out: Path, *, commit: str = "",
         written.append(shutil.copyfile(
             _require(artifacts / f"predict-report-{b.name}" / "report.html"),
             dest / "report.html"))
-        verify_md = _require(artifacts / f"verify-{b.name}" / "verify.md").read_text()
+        verify_md = _require(artifacts / f"verify-{b.name}" / "verify.md").read_text(
+            encoding="utf-8")
         backtest = dest / "backtest.html"
-        backtest.write_text(_backtest_html(b, verify_md, commit))
+        backtest.write_text(_backtest_html(b, verify_md, commit), encoding="utf-8")
         written.append(backtest)
 
     index = out / "index.html"
-    index.write_text(_index_html(live[0], completed, commit))
+    index.write_text(_index_html(live[0], completed, commit), encoding="utf-8")
     written.append(index)
     return written
 

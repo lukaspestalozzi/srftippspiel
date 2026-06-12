@@ -88,7 +88,7 @@ def _read(path: str | Path) -> tuple[Path, dict]:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
-    return path, (yaml.safe_load(path.read_text()) or {})
+    return path, (yaml.safe_load(path.read_text(encoding="utf-8")) or {})
 
 
 def load_config(path: str | Path) -> Config:

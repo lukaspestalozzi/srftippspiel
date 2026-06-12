@@ -23,7 +23,7 @@ def convert_world_tsv(
     Only teams present in ``name_to_id`` (the 48 qualified teams) are emitted.
     """
     rows_out = []
-    with Path(tsv_path).open(newline="") as fh:
+    with Path(tsv_path).open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for row in reader:
             name = (row.get(name_col) or "").strip()
@@ -38,7 +38,7 @@ def convert_world_tsv(
                 }
             )
 
-    with Path(out_path).open("w", newline="") as fh:
+    with Path(out_path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=["team_id", "name", "elo"])
         writer.writeheader()
         writer.writerows(rows_out)

@@ -64,7 +64,7 @@ class FileDataProvider(DataProvider):
 
     def get_teams(self) -> list[Team]:
         teams: list[Team] = []
-        with self.teams_file.open(newline="") as fh:
+        with self.teams_file.open(newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 if not row.get("team_id"):
                     continue
@@ -83,7 +83,7 @@ class FileDataProvider(DataProvider):
 
     def get_fixtures(self) -> list[Match]:
         fixtures: list[Match] = []
-        with self.fixtures_file.open(newline="") as fh:
+        with self.fixtures_file.open(newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 if not row.get("match_id"):
                     continue
@@ -106,7 +106,7 @@ class FileDataProvider(DataProvider):
         if not self.results_file.exists():
             return []
         results: list[Result] = []
-        with self.results_file.open(newline="") as fh:
+        with self.results_file.open(newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 if not row.get("match_id"):
                     continue
@@ -125,7 +125,7 @@ class FileDataProvider(DataProvider):
         """Optional explicit third-place combination->slot table; {} if not supplied."""
         if not self.thirds_allocation_file or not self.thirds_allocation_file.exists():
             return {}
-        return json.loads(self.thirds_allocation_file.read_text())
+        return json.loads(self.thirds_allocation_file.read_text(encoding="utf-8"))
 
     def get_odds(self) -> dict[str, Odds1X2]:
         """Optional per-match de-vigged 1X2 odds keyed by match_id; {} if not supplied.
@@ -137,7 +137,7 @@ class FileDataProvider(DataProvider):
         if not self.odds_file or not self.odds_file.exists():
             return {}
         odds: dict[str, Odds1X2] = {}
-        with self.odds_file.open(newline="") as fh:
+        with self.odds_file.open(newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 mid = (row.get("match_id") or "").strip()
                 if not mid:
