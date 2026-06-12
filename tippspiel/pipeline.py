@@ -20,6 +20,7 @@ from .strategy.expected_points import (
     best_tip,
     ev_components,
     expected_points,
+    score_tip,
 )
 
 CAVEATS = (
@@ -377,7 +378,7 @@ def _fixture_block(
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "group": m.group, "played": m.match_id in results,
              "result": None, "tip": None, "naive": None, "market_tip": None, "data": None,
-             "ldw_chart": None, "heatmap": None}
+             "actual": None, "tip_outcome": None, "ldw_chart": None, "heatmap": None}
     if block["played"]:
         r = results[m.match_id]
         block["result"] = {"home_goals": r.home_goals, "away_goals": r.away_goals}
@@ -395,12 +396,52 @@ def _fixture_block(
         nh, na, _ = dist.most_likely_scorelines(1)[0]
         block["naive"] = {"home": nh, "away": na,
                           "ev": expected_points(dist, nh, na, weight)}
+    if block["played"]:
+        r = results[m.match_id]
+        block["actual"] = _actual_likelihood(dist, r.home_goals, r.away_goals)
+        if tip is not None:
+            block["tip_outcome"] = _tip_outcome(rec_h, rec_a, r.home_goals, r.away_goals,
+                                                weight)
     _set_market_tips(block, m, weight, market, realism)
     rec = (rec_h, rec_a) if tip is not None else None
     block["data"] = _fixture_data(m, teams, dist, rec, weight, market, alpha)
     block["ldw_chart"] = charts.ldw_bar(dist, name_h, name_a)
     block["heatmap"] = charts.scoreline_heatmap(dist, rec_h, rec_a)
     return block
+
+
+def _actual_likelihood(dist, ah: int, aa: int) -> dict:
+    """How likely the model considered an actual result: the exact-scoreline cell probability
+    plus the probability of the tendency that occurred. The qualitative label keys off the
+    tendency probability — exact-score probabilities are uniformly small (~10–15% at best),
+    so they can't carry a word on their own. ``cell()`` returns 0.0 for scores beyond the
+    distribution grid, so freak scorelines are safe."""
+    if ah > aa:
+        p_tendency = dist.p_home_win()
+    elif ah < aa:
+        p_tendency = dist.p_away_win()
+    else:
+        p_tendency = dist.p_draw()
+    if p_tendency >= 0.50:
+        label = "expected"
+    elif p_tendency >= 0.25:
+        label = "plausible"
+    else:
+        label = "surprising"
+    return {"p_exact": dist.cell(ah, aa), "p_tendency": p_tendency, "label": label}
+
+
+def _tip_outcome(th: int, ta: int, ah: int, aa: int, weight: int) -> dict:
+    """How the recommended tip fared against the actual (120-minute) result: the pool points it
+    earned out of the 10×weight maximum, tagged exact hit / correct tendency / miss."""
+    points = score_tip(th, ta, ah, aa, weight)
+    if (th, ta) == (ah, aa):
+        label, cls = "exact hit", "exact"
+    elif (th > ta) == (ah > aa) and (th < ta) == (ah < aa):
+        label, cls = "correct tendency", "tendency"
+    else:
+        label, cls = "miss", "miss"
+    return {"points": points, "max": 10 * weight, "label": label, "cls": cls}
 
 
 def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
@@ -458,7 +499,11 @@ def _set_market_tips(block, m, weight, market, realism=0.0) -> None:
         return
     mdist = market_pred.scoreline
     th, ta, ev = best_tip(mdist, weight, realism)
-    block["market_tip"] = {"home": th, "away": ta, "ev": ev}
+    points = None
+    if block["result"] is not None:
+        points = score_tip(th, ta, block["result"]["home_goals"],
+                           block["result"]["away_goals"], weight)
+    block["market_tip"] = {"home": th, "away": ta, "ev": ev, "points": points}
 
 
 def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
