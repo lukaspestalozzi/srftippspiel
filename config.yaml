@@ -43,7 +43,7 @@ offdef:
   snapshot_date: "2026-06-13"
 
 simulation:
-  iterations: 50000
+  iterations: 150000
   seed: 20260611
   penalty_model: coin_flip   # coin_flip | elo_weighted
 
