@@ -163,8 +163,9 @@ def test_strategy_config_parses_realism_tolerance(tmp_path):
     assert load_config(p).strategy.realism_tolerance == 0.2
 
 
-def test_played_match_excluded_from_tips(small_cfg):
-    # A played match must not receive a tip (its result is fixed).
+def test_played_match_still_predicted_for_display(small_cfg):
+    # A played match keeps its (pre-match) prediction and tip so the report can show the
+    # forecast next to the real result; the fixture block carries BOTH result and tip.
     cfg = small_cfg
     from tippspiel.data.file_provider import FileDataProvider
 
@@ -174,8 +175,13 @@ def test_played_match_excluded_from_tips(small_cfg):
         result = run_pipeline(cfg, BUNDLE, simulate=False)
     finally:
         FileDataProvider.get_results = orig
-    assert "G_A_1" not in result["tipset"].tips
-    assert len(result["tipset"].tips) == 71
+    # The played match is still tipped (for display), so no fixture drops out of the tipset.
+    assert "G_A_1" in result["tipset"].tips
+    assert len(result["tipset"].tips) == 72
+    block = next(f for f in result["context"]["group_fixtures"] if f["match_id"] == "G_A_1")
+    assert block["played"] is True
+    assert block["result"] == {"home_goals": 1, "away_goals": 0}
+    assert block["tip"] is not None and block["data"] is not None
 
 
 def test_fixture_block_carries_underlying_data(small_cfg):
