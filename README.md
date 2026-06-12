@@ -39,6 +39,15 @@ tippspiel run --config configs/womenseuro2025.yaml   # run for a different tourn
 The report is written to `output/report.html` (configurable). A full `run` completes in a
 few seconds.
 
+## Published reports
+
+The latest reports are published to **<https://lukaspestalozzi.github.io/srftippspiel/>**:
+the live WC 2026 `run` report, plus each completed benchmark tournament's a-priori tips
+report and predictor backtest. CI rebuilds and deploys the site on every push to `main`
+(and on ready-for-review PRs, so changes can be checked on the live URL before merging) —
+see the `publish` job in `.github/workflows/ci.yml`, which assembles the site with
+`python -m tippspiel.report.site`.
+
 ## Multiple tournaments & verification
 
 The CLI is **multi-tournament**. Each tournament is **one config file** — `config.yaml`
