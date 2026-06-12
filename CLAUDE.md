@@ -195,39 +195,23 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
 
 ## Phase status
 
-Phase 1 (group tips + report) and Phase 2 (Monte Carlo engine + bonus questions) are
-implemented. Phase 3 is implemented and measurable: `MarketOddsPredictor` (de-vigged 1X2 odds →
-scoreline, Elo fallback; activated per tournament via an `odds.csv` snapshot +
-`predictor.name: market_odds`, surfaced as the report's per-fixture "Market-odds tip"), plus the
-Bächinger-style extensions: a tunable **model×market blend** (`market_weight`), a
-**draw-matching expansion** (`match_draw`), and the diagnostic **model-vs-market value check**.
-ESPN-sourced `odds.csv` snapshots are committed for 4 of the 5 `verify` benchmarks
-(womenseuro2025, wc2022, euro2024, euro2020) and wc2026; **wc2018 has none** (ESPN's archive
-returns nothing that far back — sourcing it manually, e.g. archived oddsportal exports via
-`odds_adapter.convert_odds_export`, is an open optional task). `tippspiel tune --market` sweeps
-the blend axes with the Elo params pinned. **Leak caveat:** the archived odds cover knockout
-matches priced *after* the group stage, so when comparing market-blend vs pure-Elo backtests,
-the **group-stage split** of `verify`'s calibration metrics is the leak-clean comparison (the
-Elo snapshot is strictly pre-tournament; the KO odds are not).
+All three phases are implemented. Phase 1 = group tips + report; Phase 2 = Monte Carlo engine +
+bonus questions; Phase 3 = `MarketOddsPredictor` (de-vigged 1X2 odds → scoreline, Elo fallback;
+activated per tournament via an `odds.csv` snapshot + `predictor.name: market_odds`, surfaced as
+the report's per-fixture "Market-odds tip"), with three blend knobs — `market_weight` (model×market
+pool), `match_draw` (draw-matching expansion) and `divergence_threshold` (gate the blend to fixtures
+where model and market disagree) — plus the diagnostic model-vs-market value check. `tippspiel tune
+--market` sweeps the blend axes with the Elo params pinned. ESPN-sourced `odds.csv` snapshots are
+committed for wc2026 and 4 of the 5 `verify` benchmarks (womenseuro2025, wc2022, euro2024,
+euro2020); **wc2018 has none** (ESPN's archive doesn't go that far back — sourcing it via
+`odds_adapter.convert_odds_export` is an open optional task).
 
-**Measured (2026-06, 5 benchmarks):** the best blend (`market_weight 0.5, match_draw: true`)
-improves pooled calibration slightly (RPS 0.1897→0.1886, NLL 2.842→2.810) but **costs pool
-points** (1493→1459, 45.2%→44.2% of max), and the leak-clean group-only RPS split is mixed
-(better on womenseuro2025/wc2022, worse on euro2024/euro2020). Even with the KO-odds leak
-favouring the market, the gain doesn't clear the bar — so **all configs stay on
-`elo_poisson`**; the blend knobs remain available and re-measurable as more odds snapshots
-land (full numbers: `output/tune.{md,json}` from `tune --market`).
-
-**Targeted variant (`divergence_threshold`, measured 2026-06):** gate the blend to fixtures
-where the model's 1X2 diverges from the de-vigged market by more than the threshold on some
-outcome (pure model elsewhere). At `dt 0.15, mw 0.5, match_draw` it fixes the untargeted
-blend's points loss (overall 1498 vs Elo's 1493; group-only leak-clean 882 vs 879, RPS ~flat)
-— i.e. **neutral on the backtests, not a measured win**: the gain concentrates on shock-heavy
-wc2022 (+12 group pts), is given back on womenseuro2025/euro2020, and euro2024 never crosses
-the gate. The live-use argument (current odds carry lineup/team news a pre-tournament Elo
-can't have; on wc2026 the 0.15 gate fires on 10 of 44 odds-backed fixtures and changes 4
-tips) is plausible but unprovable from archives, so enabling it on the live config is a
-user call, not a data-driven default. **User decision 2026-06-10: enabled on the live
-wc2026 `config.yaml`** (`market_odds` with `mw 0.5, match_draw, dt 0.15`, tuned Elo params
-as `fallback_params`); the completed-benchmark configs stay `elo_poisson` so `verify`/`tune`
-baselines remain pure-Elo.
+**Decision (2026-06):** on the backtests the blend is at best neutral — it slightly improves
+calibration but costs pool points, and the targeted `divergence_threshold` variant recovers the
+points without being a measured win. So the **completed-benchmark configs stay `elo_poisson`** to
+keep `verify`/`tune` baselines pure-Elo, while the **live wc2026 `config.yaml` uses `market_odds`**
+(`market_weight 0.5, match_draw, divergence_threshold 0.15`, tuned Elo params as `fallback_params`)
+— a user call justified by live odds carrying lineup/team news a pre-tournament Elo can't, not by
+the archives. Full numbers: `output/tune.{md,json}` from `tune --market`. **Leak caveat:** archived
+KO odds are priced *after* the group stage, so the leak-clean market-vs-Elo comparison is `verify`'s
+**group-stage** calibration split (the Elo snapshot is strictly pre-tournament; the KO odds are not).
