@@ -120,8 +120,8 @@ live in its **config file**, not in the data folder. Adapters convert source dat
 files: `data/eloratings_adapter.py` (eloratings.net `World.tsv` → `teams.csv`),
 `data/odds_adapter.py` (bookmaker 1X2 export → `odds.csv`) and
 `data/historical_results_adapter.py` (international-match corpus for `fit-offdef`). Elo and odds
-are snapshots that move continuously — refresh them as the tournament runs (see the `update-odds`
-skill).
+are snapshots that move continuously — refresh them as the tournament runs (see the
+`update-tournament-data` skill).
 
 ### Provenance & the one remaining approximation
 
