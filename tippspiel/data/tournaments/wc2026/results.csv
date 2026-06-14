@@ -1,3 +1,9 @@
 match_id,home_goals,away_goals,winner_team_id
 G_A_1,2,0,
 G_A_2,2,1,
+G_B_1,1,1,
+G_B_2,1,1,
+G_C_1,1,1,
+G_C_2,0,1,
+G_D_1,4,1,
+G_D_2,2,0,
