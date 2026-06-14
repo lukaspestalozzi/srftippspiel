@@ -26,10 +26,8 @@ from tippspiel.data.espn_common import (
     load_concrete_fixtures,
     load_played_match_ids,
     load_teams,
+    norm,
 )
-
-# eloratings.net's en.teams.tsv English names that differ from this repo's teams.csv names.
-_NAME_ALIASES = {"turkey": "türkiye"}
 
 
 def _fetch_text(url: str, *, retries: int = 4) -> str:
@@ -49,7 +47,7 @@ def parse_world_tsv(text: str) -> dict[str, float]:
     """eloratings team code -> current rating, from ``World.tsv`` (no header)."""
     ratings: dict[str, float] = {}
     for line in text.splitlines():
-        parts = line.split("\t")
+        parts = [p.strip() for p in line.split("\t")]
         if len(parts) < 4:
             continue
         ratings[parts[2]] = float(parts[3])
@@ -67,19 +65,19 @@ def parse_teams_tsv(text: str) -> dict[str, list[str]]:
     return names
 
 
-def _norm(name: str) -> str:
-    low = name.strip().lower()
-    return _NAME_ALIASES.get(low, low)
-
-
 def build_code_to_team_id(
     teams_tsv: dict[str, list[str]], name_to_team_id: dict[str, str]
 ) -> dict[str, str]:
-    """eloratings code -> repo ``team_id``, by matching names (normalised lowercase + aliases)."""
+    """eloratings code -> repo ``team_id``, by matching names.
+
+    ``name_to_team_id`` is keyed by ``espn_common.norm()`` (as returned by ``load_teams``); the
+    eloratings names are normalised with the same function so both sides of the lookup use the
+    one alias table.
+    """
     code_to_id = {}
     for code, names in teams_tsv.items():
         for name in names:
-            team_id = name_to_team_id.get(_norm(name))
+            team_id = name_to_team_id.get(norm(name))
             if team_id:
                 code_to_id[code] = team_id
                 break
@@ -129,13 +127,16 @@ def diff_ratings(
 
 def main(tournament: str) -> None:
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
+    if not tdir.is_dir():
+        sys.exit(f"no such tournament: {tournament!r} ({tdir} does not exist)")
     world_text = _fetch_text("https://www.eloratings.net/World.tsv")
     teams_text = _fetch_text("https://www.eloratings.net/en.teams.tsv")
     moved, unresolved = diff_ratings(tdir, world_text, teams_text)
     for team_id, old, new in moved:
         print(f"{team_id} {old:.0f} -> {new:.0f}")
     if unresolved:
-        print(f"unchanged/unmapped: {', '.join(unresolved)}", file=sys.stderr)
+        print(f"unresolved (unchanged, unmapped, or not yet processed): {', '.join(unresolved)}",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":

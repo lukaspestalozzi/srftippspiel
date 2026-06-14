@@ -38,6 +38,8 @@ def test_build_code_to_team_id_basic():
 
 
 def test_build_code_to_team_id_turkey_alias():
+    # eloratings calls it "Turkey"; teams.csv uses "Türkiye" -- resolved via espn_common's
+    # shared alias table (the same one load_teams() uses to build name_to_team_id).
     teams_tsv = {"TR": ["Turkey"]}
     code_to_id = build_code_to_team_id(teams_tsv, {"türkiye": "TUR"})
     assert code_to_id == {"TR": "TUR"}
