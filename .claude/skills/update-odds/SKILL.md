@@ -34,6 +34,33 @@ needed; played matches keep showing "as before" with the real score layered on
 The detailed odds machinery is below; the **results** and **Elo** procedures are in
 "Results" and "Elo" near the end.
 
+## Workflow & environment (read first)
+
+This skill is run repeatedly against the same branch, in a fresh container each time. Get these
+right before touching data, or you'll waste a pass reconciling.
+
+- **Branch & base.** Work on `claude/update-data`. If `origin/claude/update-data` already exists,
+  **start from it** (`git reset --hard origin/claude/update-data` onto a local branch of the same
+  name) and build on top — a prior run may have a *partial* commit there (e.g. results added but a
+  feed was unreachable, so odds/base-elo are still stale). Do **not** branch off some other dev
+  branch and replace that work; layer onto it so the push fast-forwards. Fall back to `origin/main`
+  only if the branch doesn't exist yet. This task's branch instruction overrides any default
+  dev-branch directive.
+- **Environment setup.** `pip install -e ".[dev]"` **and** `pip install pyyaml` (PyYAML is not
+  pulled in by `[dev]`, but `config.py` needs it). Run tests with **`python -m pytest -q`** — a bare
+  `pytest` on PATH may be an isolated uv-tool install without the project's deps and will fail
+  collection with `ModuleNotFoundError: No module named 'yaml'`.
+- **Network egress may block the feeds.** Some environments allowlist outbound hosts; a blocked
+  fetch returns `403 Host not in allowlist` (curl and WebFetch alike). The hosts this skill needs
+  are `site.api.espn.com`, `sports.core.api.espn.com` (odds) and `www.eloratings.net` (Elo). If one
+  is blocked: **skip just that sub-step, leave the committed snapshot untouched** (don't write an
+  empty file, don't hand-estimate), note it in the commit/PR body, and let the next run pick it up.
+  Never fabricate a value to work around a blocked feed.
+- **Commit gate.** Commit only if something actually changed (a fixture was added, odds changed, or
+  Elo changed). If no fixture has been played and odds+Elo are unchanged, make no commit. After
+  pushing, open a **draft** PR if none exists; if a PR already exists for the branch, **update its
+  body** to match the final branch state rather than leaving a stale prior-run description.
+
 # Update the odds data
 
 `odds.csv` (`match_id,odds_home,odds_draw,odds_away`, raw decimal, de-vigged at load) feeds the
@@ -121,7 +148,7 @@ the usual cause is an unmapped name — add the ESPN spelling to `_ALIASES`.
 
 ```bash
 tippspiel validate-data --config <config>   # schema/consistency incl. odds.csv
-pytest -q                                    # full suite, must stay green
+python -m pytest -q                          # full suite, must stay green (NOT bare `pytest` — see Workflow)
 ```
 
 Wire the tournament's config once (idempotent): add under its `tournament:` block
@@ -208,19 +235,23 @@ would compound the drift). Re-run the fetch on the next refresh and pick up the 
 1. **Edit the movers' `elo` in `teams.csv`** in place; update `tournament.elo_source` in the config
    to the new snapshot date + what changed.
 2. **Re-run `fit-offdef` so att/def reflect the games.** The fitter is deterministic for a fixed
-   corpus+snapshot, so it only moves if the corpus grows: the WC2026 fixtures already sit in
-   `tippspiel/data/historical/international_results.csv` as future rows with `NA,NA` scores (the
-   adapter drops `NA`), so **fill in the played matches' scores there** (find the rows by date/teams
-   — note the corpus uses full names like "Czech Republic"), and set `offdef.snapshot_date` in the
-   config to a date **after** them (the default snapshot = day-before-first-kickoff is for
-   leak-free *backtests*; a live tournament is not a benchmark, so fold the played games in). Run
-   `tippspiel fit-offdef` to rewrite `att_elo`/`def_elo` for all teams.
+   corpus+snapshot, and **base `elo` is NOT an input** — att/def only move when the *corpus* grows
+   (so on a run that only updates base elo, fit-offdef is a confirming no-op). The WC2026 fixtures
+   already sit in `tippspiel/data/historical/international_results.csv` as future rows with `NA,NA`
+   scores (the adapter drops `NA`), so **fill in the played matches' scores there** (find the rows by
+   date/teams — note the corpus uses full names like "Czech Republic"). Then check
+   `offdef.snapshot_date`: the cutoff is **strictly earlier** (`date >= snapshot_date` is dropped),
+   so it must be the day **after** the latest played match. **Only change it if a newer matchday was
+   added**; if the current value already covers the just-filled games (and excludes the not-yet-played
+   ones), leave it — "bumping" it past an unplayed matchday is wrong. (The default snapshot =
+   day-before-first-kickoff is for leak-free *backtests*; a live tournament is not a benchmark, so
+   fold the played games in.) Run `tippspiel fit-offdef` to rewrite `att_elo`/`def_elo` for all teams.
 
 ```bash
 tippspiel fit-offdef          # after editing teams.csv elo + corpus scores + offdef.snapshot_date
 tippspiel validate-data       # schema/consistency
 tippspiel run                 # regenerate output/report.html; eyeball played matches
-pytest -q && ruff check tippspiel tests
+python -m pytest -q && ruff check tippspiel tests
 ```
 
 ## Gotchas & known limits

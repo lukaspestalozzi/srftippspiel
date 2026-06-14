@@ -149,9 +149,12 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
     for match_id, d, home_id, away_id in fixtures:
         event = None
         for e in scoreboard.get(d, []):
-            comp = e["competitions"][0]
+            comps = e.get("competitions") or []
+            if not comps:
+                continue
+            comp = comps[0]
             ids = {}
-            for c in comp["competitors"]:
+            for c in comp.get("competitors", []):
                 rid = teams.get(_norm(c["team"]["displayName"]))
                 if rid:
                     ids[c["homeAway"]] = rid
