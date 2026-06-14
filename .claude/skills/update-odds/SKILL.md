@@ -18,7 +18,8 @@ When a matchday has been played in a **live** tournament (e.g. `wc2026`, `comple
 three input files need refreshing, in this order:
 
 1. **`results.csv`** — add the full-time scores of the games that have kicked off.
-2. **`odds.csv`** — re-fetch market odds (newly-priced upcoming matches appear; played ones drop).
+2. **`odds.csv`** — re-fetch market odds (newly-priced upcoming matches appear; played ones drop —
+   `espn_odds_fetch.py` filters fixtures already in `results.csv`).
 3. **`teams.csv`** Elo — bump the base `elo` of the teams that played, then re-run `fit-offdef`.
 
 Sourcing convention (decided 2026-06): **fetch the real-world data from the web** (results via
@@ -46,10 +47,10 @@ right before touching data, or you'll waste a pass reconciling.
   branch and replace that work; layer onto it so the push fast-forwards. Fall back to `origin/main`
   only if the branch doesn't exist yet. This task's branch instruction overrides any default
   dev-branch directive.
-- **Environment setup.** `pip install -e ".[dev]"` **and** `pip install pyyaml` (PyYAML is not
-  pulled in by `[dev]`, but `config.py` needs it). Run tests with **`python -m pytest -q`** — a bare
-  `pytest` on PATH may be an isolated uv-tool install without the project's deps and will fail
-  collection with `ModuleNotFoundError: No module named 'yaml'`.
+- **Environment setup.** `pip install -e ".[dev]"` (PyYAML, needed by `config.py`, is included).
+  Run tests with **`python -m pytest -q`** — a bare `pytest` on PATH may be an isolated uv-tool
+  install without the project's deps and will fail collection with `ModuleNotFoundError: No module
+  named 'yaml'`.
 - **Network egress may block the feeds.** Some environments allowlist outbound hosts; a blocked
   fetch returns `403 Host not in allowlist` (curl and WebFetch alike). The hosts this skill needs
   are `site.api.espn.com`, `sports.core.api.espn.com` (odds) and `www.eloratings.net` (Elo). If one
@@ -188,6 +189,11 @@ Procedure:
    match injects future info into the sim.
 2. **Fetch each full-time score from the web** and **dual-source** it (e.g. ESPN + FIFA/CNN) before
    writing — this is the one place a transcription error silently propagates into standings.
+   `python -m tippspiel.data.espn_results_fetch <tournament> <espn_league_slug>` prints candidate
+   rows for every finished, unrecorded fixture from the same ESPN scoreboard feed as the odds tool
+   (one of the two sources, not a replacement for dual-sourcing); `--write` appends them to
+   `results.csv` after you've checked them. Knockout matches level after 90' are flagged on stderr
+   — fill `winner_team_id` in by hand once you know the shootout result.
 3. **Orient home/away to the fixture.** Match the fixture's `home_ref`/`away_ref`; write
    `home_goals` as the repo home team's goals. Append the row(s) to `results.csv`.
 

@@ -7,6 +7,9 @@ numbers). We read the *moneyline* trio (home / draw / away), which every usable 
 convert American → decimal, and write the repo's ``odds.csv`` schema
 (``match_id,odds_home,odds_draw,odds_away``, raw decimal; de-vig happens at load).
 
+Fixtures already decided in ``results.csv`` are skipped -- ``odds.csv`` only carries upcoming
+matches.
+
 Provenance and guards:
 - Source: ``site.api.espn.com`` (scoreboard, for fixtures + team names) and
   ``sports.core.api.espn.com`` (per-event odds). Public, no key.
@@ -16,6 +19,8 @@ Provenance and guards:
   complete and whose de-vig booksum is sane (``1.0 <= sum(1/dec) <= 1.35``).
 - Prices are oriented by *team identity* (ESPN home team → repo ``home_ref``), not by assuming the
   two sources agree on which side is "home".
+- A malformed/unexpected scoreboard or odds entry for one fixture is skipped (counted as
+  "without odds"), never aborts the whole run.
 
 Usage (run from the repo root, network required)::
 
@@ -27,47 +32,18 @@ Usage (run from the repo root, network required)::
 from __future__ import annotations
 
 import csv
-import json
 import sys
-import time
-import urllib.request
 from pathlib import Path
 
-import tippspiel
-
-REPO = Path(tippspiel.__file__).parent.parent
-_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-
-# ESPN display names that differ from the repo's ``teams.csv`` names. Extend as needed.
-_ALIASES = {
-    "ir iran": "iran",
-    "korea republic": "south korea",
-    "usa": "united states",
-    "côte d'ivoire": "ivory coast",
-    "cote d'ivoire": "ivory coast",
-    "cabo verde": "cape verde",
-    "congo dr": "dr congo",
-    "bosnia & herzegovina": "bosnia and herzegovina",
-    "turkey": "türkiye",
-    "czech republic": "czechia",
-}
-
-
-def _norm(name: str) -> str:
-    return _ALIASES.get(name.strip().lower(), name.strip().lower())
-
-
-def _get_json(url: str, *, retries: int = 4) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
-    for i in range(retries):
-        try:
-            with urllib.request.urlopen(req, timeout=25) as fh:
-                return json.load(fh)
-        except Exception:  # noqa: BLE001 — maintainer tool, best-effort with backoff
-            if i == retries - 1:
-                raise
-            time.sleep(2 ** i)
-    return {}
+from tippspiel.data.espn_common import (
+    REPO,
+    fetch_scoreboard,
+    find_event,
+    get_json,
+    load_concrete_fixtures,
+    load_played_match_ids,
+    load_teams,
+)
 
 
 def _american_to_decimal(american: float) -> float:
@@ -106,7 +82,7 @@ def _odds_for_event(slug: str, event_id: str) -> tuple[float, float, float] | No
     url = (f"https://sports.core.api.espn.com/v2/sports/soccer/leagues/{slug}"
            f"/events/{event_id}/competitions/{event_id}/odds")
     try:
-        data = _get_json(url)
+        data = get_json(url)
     except Exception:  # noqa: BLE001
         return None
     for item in data.get("items", []):
@@ -119,67 +95,44 @@ def _odds_for_event(slug: str, event_id: str) -> tuple[float, float, float] | No
 def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -> int:
     """Fetch ESPN odds for ``tournament``'s fixtures and write ``odds.csv``. Returns rows written."""
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
-    teams = {}
-    with (tdir / "teams.csv").open(newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            teams[_norm(row["name"])] = row["team_id"]
+    teams = load_teams(tdir)
+    played = load_played_match_ids(tdir)
+    fixtures = [f for f in load_concrete_fixtures(tdir) if f["match_id"] not in played]
 
-    # Fixtures we want odds for: real, dated group/known matches keyed by team pair + date.
-    fixtures = []
-    with (tdir / "fixtures.csv").open(newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            ko = row.get("kickoff_utc", "")
-            home, away = row.get("home_ref", ""), row.get("away_ref", "")
-            # Only concrete matchups (group stage / completed KO), not structural refs (W:A …).
-            if ":" in home or ":" in away or "T" not in ko:
-                continue
-            fixtures.append((row["match_id"], ko[:10].replace("-", ""), home, away))
+    dates = sorted({f["date"] for f in fixtures})
+    scoreboard = fetch_scoreboard(slug, dates)
 
     rows_out, missing = [], []
-    dates = sorted({d for _, d, _, _ in fixtures})
-    scoreboard: dict[str, list] = {}
-    for d in dates:
-        url = (f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}"
-               f"/scoreboard?dates={d}")
+    for f in fixtures:
         try:
-            scoreboard[d] = _get_json(url).get("events", [])
-        except Exception:  # noqa: BLE001
-            scoreboard[d] = []
-
-    for match_id, d, home_id, away_id in fixtures:
-        event = None
-        for e in scoreboard.get(d, []):
-            comps = e.get("competitions") or []
-            if not comps:
+            found = find_event(scoreboard.get(f["date"], []), teams, f["home_id"], f["away_id"])
+            if found is None:
+                missing.append(f["match_id"])
                 continue
-            comp = comps[0]
-            ids = {}
-            for c in comp.get("competitors", []):
-                rid = teams.get(_norm(c["team"]["displayName"]))
-                if rid:
-                    ids[c["homeAway"]] = rid
-            if {ids.get("home"), ids.get("away")} == {home_id, away_id}:
-                event = (e["id"], ids)
-                break
-        if event is None:
-            missing.append(match_id)
+            event, ids = found
+            event_id = event.get("id")
+            if event_id is None:
+                missing.append(f["match_id"])
+                continue
+            trio = _odds_for_event(slug, event_id)
+            if trio is None:
+                missing.append(f["match_id"])
+                continue
+            h, draw, a = trio
+            # Orient by team identity: ESPN home team may differ from repo home_ref.
+            if ids.get("home") == f["home_id"]:
+                odds_home, odds_away = h, a
+            else:
+                odds_home, odds_away = a, h
+            rows_out.append({
+                "match_id": f["match_id"],
+                "odds_home": f"{odds_home:.2f}",
+                "odds_draw": f"{draw:.2f}",
+                "odds_away": f"{odds_away:.2f}",
+            })
+        except Exception:  # noqa: BLE001 — one bad fixture shouldn't abort the run
+            missing.append(f["match_id"])
             continue
-        trio = _odds_for_event(slug, event[0])
-        if trio is None:
-            missing.append(match_id)
-            continue
-        h, draw, a = trio
-        # Orient by team identity: ESPN home team may differ from repo home_ref.
-        if event[1].get("home") == home_id:
-            odds_home, odds_away = h, a
-        else:
-            odds_home, odds_away = a, h
-        rows_out.append({
-            "match_id": match_id,
-            "odds_home": f"{odds_home:.2f}",
-            "odds_draw": f"{draw:.2f}",
-            "odds_away": f"{odds_away:.2f}",
-        })
 
     out = Path(out_path) if out_path else (tdir / "odds.csv")
     with out.open("w", newline="", encoding="utf-8") as fh:
