@@ -62,7 +62,7 @@ tournament:
   display_name: FIFA World Cup 2026
   completed: false        # not yet played; results.csv is conditioned on as it fills
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "eloratings.net 13 June 2026 (men; post-matchday-1 movers MEX/RSA/KOR/CZE/CAN/BIH/USA/PAR all updated from the World.tsv/latest.tsv feed)"
+  elo_source: "eloratings.net 14 June 2026 (men; 13 Jun movers BRA/MAR/QAT/SUI updated from World.tsv/latest.tsv on top of earlier MEX/RSA/KOR/CZE/CAN/BIH/USA/PAR. HAI/SCO/AUS/TUR played 14 Jun but not yet in the feed — left at last value, to be picked up next run)"
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. An explicit third-place combination->slot table can be added
