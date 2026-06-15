@@ -1,10 +1,12 @@
 """Tests for the eloratings.net diff tool (tippspiel/data/eloratings_diff.py)."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from tippspiel.data.eloratings_diff import (
     build_code_to_team_id,
     diff_ratings,
+    main,
     parse_teams_tsv,
     parse_world_tsv,
 )
@@ -75,11 +77,32 @@ def test_diff_ratings(tmp_path: Path):
     _write_tournament(tmp_path)
 
     # MEX moved 1881 -> 1885; KOR/CZE unchanged; RSA's code ("ZA") is absent from the teams_tsv
-    # (unmapped); ESP didn't play so it's neither moved nor unresolved.
+    # (unmapped); ESP didn't play so it's neither moved, unchanged, nor unresolved.
     world_tsv = "16\t16\tMX\t1885\n26\t26\tKR\t1786\n42\t42\tCZ\t1712\n"
     teams_tsv = "MX\tMexico\nKR\tSouth Korea\nCZ\tCzechia\n"
 
-    moved, unresolved = diff_ratings(tmp_path, world_tsv, teams_tsv)
+    moved, unchanged, unresolved = diff_ratings(tmp_path, world_tsv, teams_tsv)
 
     assert moved == [("MEX", 1881.0, 1885.0)]
+    assert unchanged == ["CZE", "KOR"]
     assert unresolved == ["RSA"]
+
+
+def test_main_prints_summary_even_with_zero_movers(tmp_path: Path, capsys):
+    tdir = tmp_path / "tippspiel" / "data" / "tournaments" / "demo"
+    _write_tournament(tdir)
+
+    # Nothing moved: MEX/KOR/CZE all match teams.csv; RSA stays unresolved (no "ZA" code).
+    world_tsv = "16\t16\tMX\t1881\n26\t26\tKR\t1786\n42\t42\tCZ\t1712\n"
+    teams_tsv = "MX\tMexico\nKR\tSouth Korea\nCZ\tCzechia\n"
+
+    with (
+        patch("tippspiel.data.eloratings_diff.REPO", tmp_path),
+        patch("tippspiel.data.eloratings_diff._fetch_text", side_effect=[world_tsv, teams_tsv]),
+    ):
+        main("demo")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "0 movers; 3 played teams already up-to-date" in captured.err
+    assert "RSA" in captured.err

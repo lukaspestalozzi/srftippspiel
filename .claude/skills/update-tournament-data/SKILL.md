@@ -62,12 +62,18 @@ right before touching data, or you'll waste a pass reconciling.
   Elo changed). If no fixture has been played and odds+Elo are unchanged, make no commit. After
   pushing, open a **draft** PR if none exists; if a PR already exists for the branch, **update its
   body** to match the final branch state rather than leaving a stale prior-run description.
-- **Checking CI after pushing.** Don't enumerate workflow runs or job steps just to see whether the
-  push is green — `list_workflow_runs`/`list_workflow_jobs`-style calls can return hundreds of KB
-  (every step of every job). Query the **combined/check-suite status for the pushed commit's SHA**
-  instead — a single `pending`/`success`/`failure` rollup. If you must list runs, filter to that SHA
-  (`head_sha=<sha>`) with `per_page=1` rather than dumping the whole history. Only fetch individual
-  job logs if the rollup itself reports `failure` and you need to find which step broke.
+- **Checking CI after pushing.** Don't enumerate full workflow-run/job payloads just to see whether
+  the push is green — `actions_get get_workflow_run` repeats the full repo metadata twice, and
+  `list_workflow_runs` unfiltered can return ~hundreds of KB. (A "check-suite status for the SHA"
+  via `pull_request_read get_status` is **not useful here** — it returned `total_count: 0` while
+  Actions CI was actively running.) Instead:
+  1. `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>` with `per_page: 1` to
+     get the latest run's id for this push.
+  2. `actions_list list_workflow_jobs` for that run id with `workflow_jobs_filter: {filter:
+     "latest"}` — a compact per-job `conclusion` list (build, tests, the Pages-`publish` job, etc.)
+     without per-step logs.
+  Only fetch individual job logs (`actions_get get_workflow_job` / log endpoint) if one of those
+  jobs reports `failure` and you need to find which step broke.
 
 # Update the odds data
 
@@ -222,8 +228,13 @@ python -m tippspiel.data.eloratings_diff <tournament>
 This fetches eloratings.net's `World.tsv` + `en.teams.tsv`, maps eloratings' 2-letter codes to
 `team_id`s via `teams.csv`, restricts to the teams that **played** (per `results.csv`/
 `fixtures.csv`), and prints one line per team whose rating changed: `<team_id> <old_elo> ->
-<new_elo>`. Teams that played but are unchanged/not-yet-processed are listed on stderr — that's
-the lag case below, not an error. Copy the printed new values into `teams.csv`.
+<new_elo>`. Copy the printed new values into `teams.csv`.
+
+A one-line summary is **always** printed to stderr, even when nothing moved, e.g. `"0 movers; 2
+played teams already up-to-date; 1 not yet processed (unmapped or no rating yet): CV"` — silent
+stdout + that summary is the normal "feed hasn't processed this match yet" lag case below, not a
+failure. If the summary is missing entirely, something went wrong (network error, bad tournament
+name).
 
 ### Fetching by hand / debugging
 
@@ -280,8 +291,13 @@ would compound the drift). Re-run the fetch on the next refresh and pick up the 
    it if a newer matchday was added**; if the current value already covers the just-filled games (and
    excludes the not-yet-played ones), leave it — "bumping" it past an unplayed matchday is wrong.
    (The default snapshot = day-before-first-kickoff is for leak-free *backtests*; a live tournament
-   is not a benchmark, so fold the played games in.) Run `tippspiel fit-offdef` to rewrite
-   `att_elo`/`def_elo` for all teams.
+   is not a benchmark, so fold the played games in.)
+
+   **Check the cutoff mechanically before committing to it:** `tippspiel fit-offdef --dry-run`
+   prints every corpus match within 5 days of `snapshot_date`, marked `IN`/`OUT` by the same
+   `< snapshot_date` rule the fitter uses — confirm the just-filled games are `IN` and the
+   not-yet-played ones are `OUT` (writes nothing). Then run `tippspiel fit-offdef` for real to
+   rewrite `att_elo`/`def_elo` for all teams.
 
 ```bash
 tippspiel fit-offdef          # after editing teams.csv elo + corpus scores + offdef.snapshot_date

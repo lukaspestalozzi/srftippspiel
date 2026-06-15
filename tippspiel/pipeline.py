@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from .config import Config, TournamentBundle
 from .data.base import Odds1X2
@@ -219,13 +219,20 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
-def write_offdef_snapshot(bundle: TournamentBundle, offdef_block: dict | None = None) -> dict:
+def write_offdef_snapshot(
+    bundle: TournamentBundle, offdef_block: dict | None = None, *, dry_run: bool = False
+) -> dict:
     """Fit offensive/defensive Elo from the historical corpus and persist it to teams.csv.
 
     Fits ``att_elo``/``def_elo`` for every team in the corpus from all matches **strictly
     before** the tournament's first kickoff (so a ``verify`` backtest stays leak-free), then
     writes the subset mapping to this tournament's teams back into its ``teams.csv`` (preserving
     the existing columns). Returns a small stats dict for the CLI to print.
+
+    ``dry_run=True`` skips the fit and the ``teams.csv`` write entirely; instead it returns the
+    corpus matches within 5 days of ``snapshot_date`` tagged ``included`` (corpus date <
+    ``snapshot_date``) or not, so a maintainer can mechanically check the cutoff before committing
+    to a ``snapshot_date`` value.
     """
     import csv as _csv
 
@@ -260,6 +267,20 @@ def write_offdef_snapshot(bundle: TournamentBundle, offdef_block: dict | None = 
     provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
     fixtures = provider.get_fixtures()
     snapshot = block.get("snapshot_date") or min(m.kickoff for m in fixtures).date().isoformat()
+
+    if dry_run:
+        snapshot_date = date.fromisoformat(snapshot)
+        near_cutoff = []
+        for m in load_corpus(before=None, corpus_path=corpus_path, tiers=tiers):
+            try:
+                match_date = date.fromisoformat(m.date)
+            except ValueError:
+                continue
+            if abs((match_date - snapshot_date).days) <= 5:
+                near_cutoff.append((m.date, m.home, m.away, m.home_goals, m.away_goals,
+                                     match_date < snapshot_date))
+        near_cutoff.sort(key=lambda row: row[0])
+        return {"dry_run": True, "snapshot_date": snapshot, "near_cutoff": near_cutoff}
 
     matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers)
     ratings = fit_off_def(matches, params)
