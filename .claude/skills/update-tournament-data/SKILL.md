@@ -1,5 +1,5 @@
 ---
-name: update-odds
+name: update-tournament-data
 description: >-
   Refresh a live tippspiel tournament's data after a matchday: the played-match
   results (results.csv), the bookmaker odds (odds.csv, from ESPN's public feed), and
@@ -40,13 +40,14 @@ The detailed odds machinery is below; the **results** and **Elo** procedures are
 This skill is run repeatedly against the same branch, in a fresh container each time. Get these
 right before touching data, or you'll waste a pass reconciling.
 
-- **Branch & base.** Work on `claude/update-data`. If `origin/claude/update-data` already exists,
-  **start from it** (`git reset --hard origin/claude/update-data` onto a local branch of the same
-  name) and build on top — a prior run may have a *partial* commit there (e.g. results added but a
-  feed was unreachable, so odds/base-elo are still stale). Do **not** branch off some other dev
-  branch and replace that work; layer onto it so the push fast-forwards. Fall back to `origin/main`
-  only if the branch doesn't exist yet. This task's branch instruction overrides any default
-  dev-branch directive.
+- **Branch & base.** **The task prompt's branch instruction always wins** — if the prompt names a
+  branch, use that one and skip the default below. Default (no branch given in the prompt): work on
+  `claude/update-data`. If `origin/claude/update-data` already exists, **start from it**
+  (`git reset --hard origin/claude/update-data` onto a local branch of the same name) and build on
+  top — a prior run may have a *partial* commit there (e.g. results added but a feed was
+  unreachable, so odds/base-elo are still stale). Do **not** branch off some other dev branch and
+  replace that work; layer onto it so the push fast-forwards. Fall back to `origin/main` only if the
+  branch doesn't exist yet.
 - **Environment setup.** `pip install -e ".[dev]"` (PyYAML, needed by `config.py`, is included).
   Run tests with **`python -m pytest -q`** — a bare `pytest` on PATH may be an isolated uv-tool
   install without the project's deps and will fail collection with `ModuleNotFoundError: No module
@@ -61,6 +62,12 @@ right before touching data, or you'll waste a pass reconciling.
   Elo changed). If no fixture has been played and odds+Elo are unchanged, make no commit. After
   pushing, open a **draft** PR if none exists; if a PR already exists for the branch, **update its
   body** to match the final branch state rather than leaving a stale prior-run description.
+- **Checking CI after pushing.** Don't enumerate workflow runs or job steps just to see whether the
+  push is green — `list_workflow_runs`/`list_workflow_jobs`-style calls can return hundreds of KB
+  (every step of every job). Query the **combined/check-suite status for the pushed commit's SHA**
+  instead — a single `pending`/`success`/`failure` rollup. If you must list runs, filter to that SHA
+  (`head_sha=<sha>`) with `per_page=1` rather than dumping the whole history. Only fetch individual
+  job logs if the rollup itself reports `failure` and you need to find which step broke.
 
 # Update the odds data
 
@@ -206,9 +213,23 @@ After a matchday only the teams that **played** have moved on eloratings.net; th
 unchanged from the committed snapshot. Don't rewrite all 48 rows — update just the movers, in
 place, preserving the `att_elo`/`def_elo` columns.
 
-**Fetch the ratings from eloratings.net's TSV data feed.** The site's HTML is JavaScript-rendered
-(fetching a page URL returns an empty shell), but the JS loads plain tab-separated files that are
-directly fetchable with a browser `User-Agent` — the same trick as the ESPN feed:
+**Quick start:**
+
+```bash
+python -m tippspiel.data.eloratings_diff <tournament>
+```
+
+This fetches eloratings.net's `World.tsv` + `en.teams.tsv`, maps eloratings' 2-letter codes to
+`team_id`s via `teams.csv`, restricts to the teams that **played** (per `results.csv`/
+`fixtures.csv`), and prints one line per team whose rating changed: `<team_id> <old_elo> ->
+<new_elo>`. Teams that played but are unchanged/not-yet-processed are listed on stderr — that's
+the lag case below, not an error. Copy the printed new values into `teams.csv`.
+
+### Fetching by hand / debugging
+
+The site's HTML is JavaScript-rendered (fetching a page URL returns an empty shell), but the JS
+loads plain tab-separated files that are directly fetchable with a browser `User-Agent` — the same
+trick as the ESPN feed, and what `eloratings_diff` does under the hood:
 
 ```bash
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -226,8 +247,9 @@ Other useful files on the same host: `<year>.tsv` (that year's rating table, e.g
 `<year>_results.tsv` (all matches of a year), `en.teams.tsv` (team code → name(s), with aliases).
 Team codes are eloratings' own two-letter codes (mostly ISO-3166: `MX` Mexico, `ZA` South Africa,
 `KR` South Korea, `CZ` Czechia, `EN` England, `PT` Portugal…) — map via `en.teams.tsv`, not by
-guessing. Use `latest.tsv` to confirm a match was processed and lift the **new ratings**
-(cols 11-12) straight into `teams.csv`.
+guessing (this is what `eloratings_diff` does). Use `latest.tsv` to confirm a match was processed
+and lift the **new ratings** (cols 11-12) straight into `teams.csv` if `eloratings_diff` can't
+resolve a team's code (e.g. a new tournament's roster needs an alias added).
 
 **Lag caveat — do NOT compute Elo yourself.** The feed updates only after eloratings processes a
 match — typically same-day, but a game that finished hours ago may not be in `latest.tsv`/`World.tsv`
@@ -245,13 +267,21 @@ would compound the drift). Re-run the fetch on the next refresh and pick up the 
    (so on a run that only updates base elo, fit-offdef is a confirming no-op). The WC2026 fixtures
    already sit in `tippspiel/data/historical/international_results.csv` as future rows with `NA,NA`
    scores (the adapter drops `NA`), so **fill in the played matches' scores there** (find the rows by
-   date/teams — note the corpus uses full names like "Czech Republic"). Then check
-   `offdef.snapshot_date`: the cutoff is **strictly earlier** (`date >= snapshot_date` is dropped),
-   so it must be the day **after** the latest played match. **Only change it if a newer matchday was
-   added**; if the current value already covers the just-filled games (and excludes the not-yet-played
-   ones), leave it — "bumping" it past an unplayed matchday is wrong. (The default snapshot =
-   day-before-first-kickoff is for leak-free *backtests*; a live tournament is not a benchmark, so
-   fold the played games in.) Run `tippspiel fit-offdef` to rewrite `att_elo`/`def_elo` for all teams.
+   date/teams — note the corpus uses full names like "Czech Republic").
+
+   **Corpus dates are local match dates; `fixtures.csv`'s `kickoff_utc` is UTC.** A late UTC kickoff
+   can fall on the *previous* local day at a western-hemisphere venue — e.g. WC2026 `G_A_2`
+   (KOR–CZE) has `kickoff_utc=2026-06-12T02:00:00Z` but its `international_results.csv` row is dated
+   `2026-06-11` (Zapopan, Mexico, UTC-6). When deciding `offdef.snapshot_date`, compare against the
+   **corpus dates** of the matches you just filled in, not their `kickoff_utc`.
+
+   Then check `offdef.snapshot_date`: the cutoff is **strictly earlier** (`date >= snapshot_date` is
+   dropped), so it must be the day **after** the latest played match's *corpus* date. **Only change
+   it if a newer matchday was added**; if the current value already covers the just-filled games (and
+   excludes the not-yet-played ones), leave it — "bumping" it past an unplayed matchday is wrong.
+   (The default snapshot = day-before-first-kickoff is for leak-free *backtests*; a live tournament
+   is not a benchmark, so fold the played games in.) Run `tippspiel fit-offdef` to rewrite
+   `att_elo`/`def_elo` for all teams.
 
 ```bash
 tippspiel fit-offdef          # after editing teams.csv elo + corpus scores + offdef.snapshot_date
