@@ -40,7 +40,7 @@ offdef:
   # Live tournament: include the played results (11-14 June matchdays) in the off/def fit. The
   # default snapshot (day before first kickoff) is for leak-free backtests; wc2026 is live, not a
   # benchmark, so we deliberately fold in the games already played.
-  snapshot_date: "2026-06-15"
+  snapshot_date: "2026-06-16"
 
 simulation:
   iterations: 500000   # max per-team MC standard error = 0.5/sqrt(n) ~= 0.07pp; ~30s/run
@@ -62,7 +62,7 @@ tournament:
   display_name: FIFA World Cup 2026
   completed: false        # not yet played; results.csv is conditioned on as it fills
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "eloratings.net 15 June 2026 (men; GER/CUW/CIV/ECU/NED/JPN/SWE/TUN — the 14 Jun GER-CUW, CIV-ECU, NED-JPN & SWE-TUN matches — now processed and updated from World.tsv/latest.tsv, on top of earlier HAI/SCO/AUS/TUR and MEX/RSA/KOR/CZE/CAN/BIH/USA/PAR/BRA/MAR/QAT/SUI movers. 14 Jun results added to results.csv & corpus, snapshot_date bumped to 15 Jun; odds re-fetched from ESPN. ESP-CPV (15 Jun) still in progress at refresh time — left for next run)"
+  elo_source: "eloratings.net 15 June 2026 (men; no new Elo movers this run — the only newly-played match, ESP-CPV 0-0 on 15 Jun, was not yet processed by eloratings at refresh time (latest.tsv covers through 14 Jun), so ESP/CPV base elo left at committed values for the next run. Prior movers retained: GER/CUW/CIV/ECU/NED/JPN/SWE/TUN (14 Jun), HAI/SCO/AUS/TUR and MEX/RSA/KOR/CZE/CAN/BIH/USA/PAR/BRA/MAR/QAT/SUI. ESP-CPV 0-0 result added to results.csv & corpus, snapshot_date bumped to 16 Jun; odds re-fetched from ESPN.)"
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. An explicit third-place combination->slot table can be added
