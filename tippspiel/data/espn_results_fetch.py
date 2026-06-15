@@ -59,6 +59,7 @@ def fetch_results(tournament: str, slug: str, write: bool = False) -> list[dict]
     scoreboard = fetch_scoreboard(slug, dates)
 
     rows_out, not_final, missing, shootout_watch = [], [], [], []
+    final_detail: dict[str, str] = {}
     for f in candidates:
         try:
             found = find_event(scoreboard.get(f["date"], []), teams, f["home_id"], f["away_id"])
@@ -66,8 +67,8 @@ def fetch_results(tournament: str, slug: str, write: bool = False) -> list[dict]
                 missing.append(f["match_id"])
                 continue
             event, ids = found
-            state = ((event.get("status") or {}).get("type") or {}).get("state")
-            if state != "post":
+            status_type = (event.get("status") or {}).get("type") or {}
+            if status_type.get("state") != "post":
                 not_final.append(f["match_id"])
                 continue
             comp = (event.get("competitions") or [{}])[0]
@@ -89,6 +90,7 @@ def fetch_results(tournament: str, slug: str, write: bool = False) -> list[dict]
                 "away_goals": away_goals,
                 "winner_team_id": "",
             })
+            final_detail[f["match_id"]] = status_type.get("shortDetail") or "FT"
         except Exception:  # noqa: BLE001 — one bad fixture shouldn't abort the run
             missing.append(f["match_id"])
             continue
@@ -96,6 +98,12 @@ def fetch_results(tournament: str, slug: str, write: bool = False) -> list[dict]
     writer = csv.DictWriter(sys.stdout, fieldnames=_FIELDNAMES, lineterminator="\n")
     for row in rows_out:
         writer.writerow(row)
+    if rows_out:
+        confirmed = ", ".join(
+            f"{r['match_id']} {r['home_goals']}-{r['away_goals']} ({final_detail[r['match_id']]})"
+            for r in rows_out
+        )
+        print(f"# confirmed final (status.state==post): {confirmed}", file=sys.stderr)
     if shootout_watch:
         print(f"# level after 90' in a knockout match -- fill winner_team_id by hand: "
               f"{shootout_watch}", file=sys.stderr)

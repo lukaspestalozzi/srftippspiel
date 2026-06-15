@@ -122,8 +122,15 @@ def _cmd_tune(cfg, benchmark_configs, top: int, market: bool = False) -> int:
     return 0
 
 
-def _cmd_fit_offdef(bundle, config_path) -> int:
-    stats = write_offdef_snapshot(bundle, load_offdef_block(config_path))
+def _cmd_fit_offdef(bundle, config_path, *, dry_run: bool = False) -> int:
+    stats = write_offdef_snapshot(bundle, load_offdef_block(config_path), dry_run=dry_run)
+    if stats.get("dry_run"):
+        print(f"[{bundle.display_name}] offdef snapshot_date = {stats['snapshot_date']} "
+              f"(corpus dates < snapshot_date are INcluded in the fit)")
+        for match_date, home, away, hg, ag, included in stats["near_cutoff"]:
+            mark = "IN " if included else "OUT"
+            print(f"  {mark} {match_date}  {home} {hg}-{ag} {away}")
+        return 0
     print(f"[{bundle.display_name}] off/def Elo fitted from {stats['corpus_matches']:,} matches "
           f"before {stats['snapshot_date']} ({stats['corpus_teams']} corpus teams); "
           f"wrote att_elo/def_elo for {stats['teams_written']} teams.")
@@ -250,13 +257,21 @@ def main(argv: list[str] | None = None) -> int:
         ("predict", "group-stage predictions + tips only (no simulation)"),
         ("verify", "backtest the predictor against a completed tournament (pool points)"),
         ("validate-data", "check input files for errors"),
-        ("fit-offdef", "fit offensive/defensive Elo from history -> teams.csv att_elo/def_elo"),
     ]:
         _add_common_args(sub.add_parser(name, help=help_text), with_default=False)
     diag = sub.add_parser("diagnose", help="write the Claude diagnostic report (markdown + JSON)")
     _add_common_args(diag, with_default=False)
     diag.add_argument("--no-sim", action="store_true",
                       help="skip Monte Carlo (fast, predictor-only diagnostics)")
+    fitoffdef = sub.add_parser(
+        "fit-offdef", help="fit offensive/defensive Elo from history -> teams.csv att_elo/def_elo"
+    )
+    _add_common_args(fitoffdef, with_default=False)
+    fitoffdef.add_argument(
+        "--dry-run", action="store_true",
+        help="print which corpus matches fall inside/outside the snapshot_date cutoff "
+             "without writing teams.csv",
+    )
     tune = sub.add_parser("tune", help="sweep predictor params against completed-tournament backtests")
     _add_common_args(tune, with_default=False)
     tune.add_argument("--benchmarks", metavar="PATH", nargs="+", default=DEFAULT_BENCHMARKS,
@@ -290,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "validate-data":
             return _cmd_validate(cfg, bundle)
         if args.command == "fit-offdef":
-            return _cmd_fit_offdef(bundle, config_path)
+            return _cmd_fit_offdef(bundle, config_path, dry_run=args.dry_run)
         if args.command == "diagnose":
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
         if args.command == "tune":

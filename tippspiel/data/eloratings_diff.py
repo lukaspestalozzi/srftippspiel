@@ -86,12 +86,13 @@ def build_code_to_team_id(
 
 def diff_ratings(
     tdir: Path, world_tsv_text: str, teams_tsv_text: str
-) -> tuple[list[tuple[str, float, float]], list[str]]:
+) -> tuple[list[tuple[str, float, float]], list[str], list[str]]:
     """Elo movements for teams that **played**, per ``results.csv``.
 
-    Returns ``(moved, unresolved)``: ``moved`` is ``[(team_id, old_elo, new_elo), ...]`` for
-    played teams whose rating differs from the committed ``teams.csv`` value; ``unresolved`` is
-    played ``team_id``s with no eloratings code mapping or no rating in ``World.tsv`` yet.
+    Returns ``(moved, unchanged, unresolved)``: ``moved`` is ``[(team_id, old_elo, new_elo), ...]``
+    for played teams whose rating differs from the committed ``teams.csv`` value; ``unchanged`` is
+    played ``team_id``s whose rating matches (resolved but not yet moved); ``unresolved`` is played
+    ``team_id``s with no eloratings code mapping or no rating in ``World.tsv`` yet.
     """
     name_to_id = load_teams(tdir)
 
@@ -113,6 +114,7 @@ def diff_ratings(
     id_to_code = {team_id: code for code, team_id in code_to_id.items()}
 
     moved: list[tuple[str, float, float]] = []
+    unchanged: list[str] = []
     unresolved: list[str] = []
     for team_id in sorted(played_teams):
         code = id_to_code.get(team_id)
@@ -122,7 +124,9 @@ def diff_ratings(
             unresolved.append(team_id)
         elif new != old:
             moved.append((team_id, old, new))
-    return moved, unresolved
+        else:
+            unchanged.append(team_id)
+    return moved, unchanged, unresolved
 
 
 def main(tournament: str) -> None:
@@ -131,12 +135,13 @@ def main(tournament: str) -> None:
         sys.exit(f"no such tournament: {tournament!r} ({tdir} does not exist)")
     world_text = _fetch_text("https://www.eloratings.net/World.tsv")
     teams_text = _fetch_text("https://www.eloratings.net/en.teams.tsv")
-    moved, unresolved = diff_ratings(tdir, world_text, teams_text)
+    moved, unchanged, unresolved = diff_ratings(tdir, world_text, teams_text)
     for team_id, old, new in moved:
         print(f"{team_id} {old:.0f} -> {new:.0f}")
+    summary = f"{len(moved)} movers; {len(unchanged)} played teams already up-to-date"
     if unresolved:
-        print(f"unresolved (unchanged, unmapped, or not yet processed): {', '.join(unresolved)}",
-              file=sys.stderr)
+        summary += f"; {len(unresolved)} not yet processed (unmapped or no rating yet): {', '.join(unresolved)}"
+    print(summary, file=sys.stderr)
 
 
 if __name__ == "__main__":
