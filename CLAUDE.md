@@ -60,6 +60,15 @@ per-match max). It also reports **calibration** (mean tendency RPS + scoreline N
 model beats the naive baseline on all five. Code: `tippspiel/report/backtest.py`; scoring helper
 `score_tip` in `strategy/expected_points.py`.
 
+`verify` is for **completed** tournaments. To score a **live** tournament's already-played tips
+leak-free, use `python scripts/retro_tips.py` (default `--config config.yaml`): it replays the
+predictor on the data **as committed before each result was added** (the introducing commit's first
+parent) and totals the pool points the recommended tips actually earned, vs naive. Scoring played
+matches against the *current* files is leaky (a winner's Elo is bumped up *after* the result —
+worth +5 pts on WC2026 matchday 1). Re-run it each matchday to keep the predict→score→learn loop
+closed; findings + the standing "don't overfit to a single matchday" cautions live in
+`docs/matchday-retrospective.md`.
+
 `tippspiel tune` sweeps the predictor params (`mu`, `k`, `rho`, `host_elo_bonus`,
 `ko_goal_scale`, `alpha`) over the completed-tournament backtests and writes a leaderboard
 (`output/tune.{md,json}`). The objective is **blended**: rank by mean RPS (calibration),
