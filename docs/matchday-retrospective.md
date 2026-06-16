@@ -93,13 +93,27 @@ Eight misses, but the diagnosis matters more than the count:
    2022 (host) lost all three; a bigger host term would have hurt there. Mexico (also host) was
    tipped 2:0 *exact*. n=1 bad host match isn't a signal.
 
-### Decide — a genuine value call (not auto-applied)
+### Applied — `realism_tolerance` lowered 0.15 → 0.05
 
-5. **`realism_tolerance`: 0.15 vs lower.** It cost ~0.7pp of max on the 261-match benchmark
-   (strict-EV 45.2% vs 44.5%) — a deliberate points-for-realism trade. On live matchday 1 it
-   *gained* (+2), so the two are within noise. If the next round is pure points-maximisation,
-   testing `0.05–0.10` is defensible; if realistic-looking tips matter for the pool, keep `0.15`.
-   Left unchanged pending a decision — it's a value judgement, not a bug.
+5. The old `0.15` sat at the **bottom** of the points curve. Sweeping it on the 261-match
+   benchmark set (total pool points, %max):
+
+   | realism_tol | %max | both-teams-score tip% | shutout tip% |
+   |---|---|---|---|
+   | 0.00 (strict EV) | 45.24 | 24.5 | 75.5 |
+   | **0.05 (now)** | **45.33** | **38.3** | 61.7 |
+   | 0.10 | 44.64 | 55.6 | 44.4 |
+   | 0.15 (old) | 44.52 | 68.6 | 31.4 |
+   | 0.20 | 44.76 | 77.8 | 22.2 |
+   | 0.30 | 45.24 | 93.9 | 6.1 |
+
+   **`0.05` is the sweet spot**: highest points (fractionally above strict EV) *and* lifts
+   both-teams-score tips from 24.5% → 38.3% — i.e. most of the realism benefit at ~zero points
+   cost. The old `0.15` paid ~0.8pp of pool points (~27 points over 261 matches) for extra
+   realism past that. The points surface is flat/noisy (full range ~0.8pp) and the per-tournament
+   delta vs `0.15` flips sign (3 of 5 favour `0.05`), so this is a **weak** points win, not a
+   robust one — but `0.05` dominates `0.15` (same-or-better points, still realistic), so it's
+   close to a free change. Reproduce: the sweep loop over `best_tip(dist, w, tol)`.
 
 ## Bottom line
 

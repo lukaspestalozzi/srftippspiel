@@ -188,9 +188,12 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
   goal-diff terms dominate the 1-pt goal terms. `best_tip` instead picks, among scorelines
   within `realism_tolerance` pool-points of the EV optimum, the one nearest the model's expected
   scoreline — flipping e.g. 1:0→2:1 (same tendency + margin) when the model expects goals.
-  `0` = legacy strict EV (byte-identical); `~0.15` lifts both-teams-score tips to a realistic
-  ~50%. It only affects pool **points**, never RPS/NLL (those come from the distribution, not the
-  tip), so `tune` (RPS-primary) deliberately excludes it — set it by direct points-cost measurement.
+  `0` = legacy strict EV (byte-identical, ~25% both-teams-score tips on the benchmarks). The
+  config uses `0.05`: the sweep in `docs/matchday-retrospective.md` shows it is the points sweet
+  spot (45.33% of max vs strict-EV's 45.24% over the 261 benchmark matches) while lifting BTS tips
+  to ~38%, whereas `0.15` pays ~0.8pp of points for extra realism (BTS ~69%) you don't need. It
+  only affects pool **points**, never RPS/NLL (those come from the distribution, not the tip), so
+  `tune` (RPS-primary) deliberately excludes it — set it by direct points-cost measurement.
 - **Validation is against reality**: `historical_stats.py` holds sourced figures that drive
   both the top-scorer prior and `tests/test_historical_validation.py`. Update it (with
   sources) rather than hardcoding magic numbers elsewhere.

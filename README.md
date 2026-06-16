@@ -95,8 +95,9 @@ tips a shutout (one team scores 0) in ~89% of matches — correct for points, bu
 since the tendency (5) and goal-diff (3) terms dwarf the per-team goal terms (1+1). With a small
 tolerance, the optimiser picks — among scorelines within that many pool-points of the EV optimum
 — the one closest to the model's expected score, flipping e.g. `1:0`→`2:1` (same winner and
-margin) when the model expects goals. `0` reproduces strict EV; `~0.15` lifts both-teams-score
-tips to a realistic ~50% at a negligible (<2%) points cost.
+margin) when the model expects goals. `0` reproduces strict EV; the config uses `0.05`, which
+lifts both-teams-score tips to a more realistic rate at essentially no points cost (the
+benchmark sweep in `docs/matchday-retrospective.md`).
 
 ## Scoring rules implemented
 

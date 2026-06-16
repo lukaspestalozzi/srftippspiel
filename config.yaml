@@ -53,9 +53,12 @@ report:
 
 strategy:
   # Realistic tips: among scorelines within this many pool-points of the EV optimum, pick the
-  # one nearest the model's expected score. 0 = strict EV (~8% both-teams-score, ~89% shutouts);
-  # 0.15 lifts both-teams-score tips to a realistic ~50% at a negligible (~1.5%) points cost.
-  realism_tolerance: 0.15
+  # one nearest the model's expected score. 0 = strict EV (~25% both-teams-score tips on the
+  # benchmarks). 0.05 is the sweet spot: it lifts both-teams-score tips to ~38% at ~zero points
+  # cost (45.33% of max vs strict-EV's 45.24% over the 261 benchmark matches), whereas higher
+  # values (0.15 -> 44.5%) pay ~0.8pp of pool points for extra realism you don't need. See the
+  # realism_tolerance sweep in docs/matchday-retrospective.md.
+  realism_tolerance: 0.05
 
 tournament:
   name: wc2026
