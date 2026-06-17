@@ -42,6 +42,17 @@ offdef:
   # benchmark, so we deliberately fold in the games already played.
   snapshot_date: "2026-06-17"
 
+# Scalar base Elo. `source: corpus` derives `elo` from the same committed match corpus via the
+# World-Football-Elo update (no more eloratings.net fetching) -- the live tournament's Elo now
+# moves only when the corpus grows. The defaults (k_scale 1.4, home_advantage 60) are calibrated
+# against the completed-tournament backtests, not the canonical 1.0/100 (a from-scratch fit
+# compresses the spread; see CLAUDE.md). Completed benchmarks + womenseuro2025 use `source:
+# external` (keep their committed snapshot; the men's corpus can't reproduce them).
+elo:
+  source: corpus
+  k_scale: 1.4
+  home_advantage: 60
+
 simulation:
   iterations: 500000   # max per-team MC standard error = 0.5/sqrt(n) ~= 0.07pp; ~30s/run
   seed: 20260611
@@ -65,7 +76,7 @@ tournament:
   display_name: FIFA World Cup 2026
   completed: false        # not yet played; results.csv is conditioned on as it fills
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "eloratings.net 17 June 2026 (men; 8 Elo movers this run: FRA/SEN (FRA-SEN 3-1), IRQ/NOR (IRQ-NOR 1-4), ARG/ALG (ARG-ALG 3-0) and AUT/JOR (AUT-JOR 3-1), all played 16 Jun (Group I & J matchday 1). Those four results added to results.csv & corpus; off/def re-fitted. snapshot_date bumped to 17 Jun (day after the latest played matchday, 16 Jun). Odds re-fetched from ESPN (played fixtures dropped, several upcoming fixtures re-priced).)"
+  elo_source: "corpus-derived (World-Football-Elo via fit-ratings, calibrated k_scale 1.4 / home_advantage 60). 4 Group I & J matchday-1 games played 16 Jun added to the corpus & results.csv (FRA-SEN 3-1, IRQ-NOR 1-4, ARG-ALG 3-0, AUT-JOR 3-1); snapshot_date bumped to 17 Jun (day after the latest played matchday) and elo + off/def re-fitted from the grown corpus. Odds re-fetched from ESPN (played fixtures dropped, several upcoming fixtures re-priced)."
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. An explicit third-place combination->slot table can be added

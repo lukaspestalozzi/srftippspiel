@@ -59,6 +59,12 @@ def load_teams(tdir: Path) -> dict[str, str]:
     return teams
 
 
+def load_team_names(tdir: Path) -> dict[str, str]:
+    """Repo ``team_id`` -> display ``name`` (the inverse of ``load_teams``), from ``teams.csv``."""
+    with (tdir / "teams.csv").open(newline="", encoding="utf-8") as fh:
+        return {row["team_id"]: row["name"] for row in csv.DictReader(fh)}
+
+
 def load_concrete_fixtures(tdir: Path) -> list[dict]:
     """Fixtures with a real, dated two-team matchup -- skips structural KO refs (``W:A``, ...)."""
     fixtures = []
@@ -75,6 +81,7 @@ def load_concrete_fixtures(tdir: Path) -> list[dict]:
                 "home_id": home,
                 "away_id": away,
                 "kickoff_utc": ko,
+                "venue_country": (row.get("venue_country") or "").strip(),
             })
     return fixtures
 

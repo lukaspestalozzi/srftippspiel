@@ -64,8 +64,23 @@ _CONTINENTAL = frozenset({
 _WORLD_CUP = frozenset({"FIFA World Cup"})
 
 
+@dataclass(frozen=True)
+class KTiers:
+    """World-Football-Elo K-factor base, by competition tier (used by the scalar-Elo fit).
+
+    These are the canonical eloratings.net tournament weights: a World Cup final match moves
+    ratings 3x as much as a friendly. Distinct from ``WeightTiers`` (the off/def goal-fit
+    weights) — the two scales are tuned independently."""
+
+    friendly: float = 20.0
+    qualifier: float = 40.0
+    minor: float = 30.0
+    continental: float = 50.0
+    world_cup: float = 60.0
+
+
 def classify_weight(tournament: str, tiers: WeightTiers = WeightTiers()) -> float:
-    """Map a corpus ``tournament`` label to its importance weight."""
+    """Map a corpus ``tournament`` label to its off/def importance weight."""
     t = tournament.strip()
     if t == "Friendly":
         return tiers.friendly
@@ -78,16 +93,37 @@ def classify_weight(tournament: str, tiers: WeightTiers = WeightTiers()) -> floa
     return tiers.default
 
 
+def elo_k_importance(tournament: str, tiers: KTiers = KTiers()) -> float:
+    """Map a corpus ``tournament`` label to its World-Football-Elo K base.
+
+    Mirrors ``classify_weight``'s bucketing but on the eloratings K scale: World Cup finals
+    (60) > continental finals / Confederations Cup (50) > qualifiers + Nations Leagues (40) >
+    other minor tournaments (30) > friendlies (20)."""
+    t = tournament.strip()
+    if t == "Friendly":
+        return tiers.friendly
+    if "qualification" in t or "Nations League" in t:
+        return tiers.qualifier
+    if t in _WORLD_CUP:
+        return tiers.world_cup
+    if t in _CONTINENTAL:
+        return tiers.continental
+    return tiers.minor
+
+
 def load_corpus(
     *,
     before: str | None = None,
     corpus_path: str | Path = DEFAULT_CORPUS,
     tiers: WeightTiers = WeightTiers(),
+    k_tiers: KTiers = KTiers(),
 ) -> list[HistMatch]:
     """Load played historical matches as weighted ``HistMatch`` records.
 
     ``before`` (ISO ``yyyy-mm-dd``), when given, keeps only matches strictly earlier — the
     pre-tournament snapshot cutoff that keeps a ``verify`` backtest free of result leakage.
+    Each record carries both the off/def ``weight`` and the scalar-Elo ``k_importance`` so the
+    corpus is parsed once and feeds both fitters.
     """
     out: list[HistMatch] = []
     with Path(corpus_path).open(newline="", encoding="utf-8") as fh:
@@ -98,14 +134,16 @@ def load_corpus(
             hg, ag = (row.get("home_score") or "").strip(), (row.get("away_score") or "").strip()
             if not hg or not ag or hg == "NA" or ag == "NA":
                 continue  # unplayed (future) fixture
+            tournament = row.get("tournament") or ""
             out.append(HistMatch(
                 date=date,
                 home=(row["home_team"]).strip(),
                 away=(row["away_team"]).strip(),
                 home_goals=int(hg),
                 away_goals=int(ag),
-                weight=classify_weight(row.get("tournament") or "", tiers),
+                weight=classify_weight(tournament, tiers),
                 neutral=(row.get("neutral") or "").strip().upper() == "TRUE",
+                k_importance=elo_k_importance(tournament, k_tiers),
             ))
     return out
 

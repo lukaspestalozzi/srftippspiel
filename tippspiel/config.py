@@ -121,11 +121,43 @@ def load_config(path: str | Path) -> Config:
 
 def load_offdef_block(path: str | Path) -> dict:
     """The optional ``offdef:`` block (off/def Elo fit hyperparameters + weight tiers +
-    snapshot date), used by ``tippspiel fit-offdef``. Empty dict when absent — the fitter then
+    snapshot date), used by ``tippspiel fit-ratings``. Empty dict when absent — the fitter then
     runs on its built-in defaults. Kept as a raw dict so ``config.py`` stays type-light; the
     fit layer constructs its own dataclasses from it."""
     _path, raw = _read(path)
     return dict(raw.get("offdef", {}) or {})
+
+
+def load_elo_block(path: str | Path) -> dict:
+    """The optional ``elo:`` block (scalar World-Football-Elo fit hyperparameters + K tiers),
+    used by ``tippspiel fit-ratings``. Empty dict when absent — the fitter then runs on its
+    built-in defaults. The fit's ``snapshot_date`` is shared with the ``offdef:`` block (a single
+    cutoff keeps leak-freeness reasoning intact), so it is read from there, not here."""
+    _path, raw = _read(path)
+    return dict(raw.get("elo", {}) or {})
+
+
+def write_offdef_snapshot_date(config_path: str | Path, iso_date: str) -> bool:
+    """Set ``offdef.snapshot_date`` to ``iso_date`` via a comment-preserving single-line edit.
+
+    Used by the live-update tooling to advance the cutoff to the day after the latest played match
+    without round-tripping the YAML (which would drop comments). Returns True if the file changed.
+    """
+    import re
+
+    path = Path(config_path)
+    text = path.read_text(encoding="utf-8")
+    new, n = re.subn(
+        r"(?m)^(\s*snapshot_date:\s*)\S.*?(\s*(?:#.*)?)$",
+        rf'\g<1>"{iso_date}"\g<2>',
+        text,
+    )
+    if n == 0:
+        raise ValueError(f"no 'snapshot_date:' line found in {config_path}")
+    if new == text:
+        return False
+    path.write_text(new, encoding="utf-8")
+    return True
 
 
 def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> TournamentBundle:

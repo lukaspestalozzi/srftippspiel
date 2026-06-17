@@ -32,7 +32,7 @@ tippspiel predict                 # group-stage predictions + tips only (no sim)
 tippspiel run                     # full pipeline: predict + 50k simulations + report
 tippspiel verify                  # backtest the predictor on a completed tournament
 tippspiel tune                    # sweep predictor params vs the completed-tournament backtests
-tippspiel fit-offdef              # fit per-team offensive/defensive Elo from history into teams.csv
+tippspiel fit-ratings             # fit scalar + offensive/defensive Elo from the corpus into teams.csv
 tippspiel run --config configs/womenseuro2025.yaml   # run for a different tournament
 ```
 
@@ -73,12 +73,15 @@ leave-one-tournament-out generalisation check. The shipped config parameters are
 
 A single Elo rating sets *who* wins but makes every match expect the same total goals. To add
 the goal-**volume** dimension — a Spain–Norway shoot-out vs. an Italy–Greece stalemate — each
-team also carries `att_elo` (attack) and `def_elo` (defence), fitted by `tippspiel fit-offdef`
+team also carries `att_elo` (attack) and `def_elo` (defence), fitted by `tippspiel fit-ratings`
 from the full international match-goal history (1872–present, committed under
 `tippspiel/data/historical/`) using an online, Elo-style update on goals scored/conceded
 (FIFA-importance-weighted). The predictor folds them in as a symmetric volume term with a tunable
 weight `alpha` (0 = pure Elo); two strong attacks → higher-scoring, two stingy defences → tighter.
-`fit-offdef` snapshots ratings as of the day before kickoff and writes them into `teams.csv`.
+`fit-ratings` snapshots ratings as of the day before kickoff and writes them into `teams.csv`. The
+same command (with `elo.source: corpus`) also derives the scalar base `elo` from that one corpus,
+so the live tournament no longer fetches eloratings.net; completed benchmarks keep their committed
+snapshot (`elo.source: external`). Per-tournament `results.csv` is thin and references the corpus.
 
 ## Configuration
 
@@ -110,19 +113,19 @@ World Champion bonus = 50 points.
 
 | File | Contents |
 |---|---|
-| `teams.csv` | teams: `team_id, name, elo` (+ optional `att_elo, def_elo` from `fit-offdef`) |
+| `teams.csv` | teams: `team_id, name, elo` (+ optional `att_elo, def_elo`) — all three columns written by `fit-ratings` |
 | `fixtures.csv` | all matches. Group rows use concrete teams; knockout rows use concrete teams for a completed event, else structured references — `W:A`/`R:B` (group winner/runner-up), `3RD:74:ABCDF` (a best-third filling slot 74 from the listed groups), `WIN:M101`/`LOSE:M101` (winner/loser of a match). The bracket is derived from these. |
-| `results.csv` | played matches (append rows as the tournament runs; full for a completed event) |
+| `results.csv` | played matches, **thin**: `match_id, date, winner_team_id` — the scoreline is read from the match corpus by date + teams (`winner_team_id` only for a knockout penalty shootout). Inline `home_goals, away_goals` are still accepted (synthetic/legacy data). |
 | `thirds_allocation.json` | *optional* — explicit third-place combination→slot table (FIFA "Annex C"); absent ⇒ constraint-respecting bipartite fallback |
 | `odds.csv` | *optional* — pre-match bookmaker 1X2 odds: `match_id, odds_home, odds_draw, odds_away` (raw decimal, de-vigged at load). Feeds the market-odds predictor and the report's per-fixture **Market-odds tip**. Rows are per-match optional; a missing match falls back to Elo. |
 
 The tournament's display name, `completed` flag, data folder, Elo source and `bonus_questions`
 live in its **config file**, not in the data folder. Adapters convert source data into these
-files: `data/eloratings_adapter.py` (eloratings.net `World.tsv` → `teams.csv`),
-`data/odds_adapter.py` (bookmaker 1X2 export → `odds.csv`) and
-`data/historical_results_adapter.py` (international-match corpus for `fit-offdef`). Elo and odds
-are snapshots that move continuously — refresh them as the tournament runs (see the
-`update-tournament-data` skill).
+files: `data/odds_adapter.py` (bookmaker 1X2 export → `odds.csv`) and
+`data/historical_results_adapter.py` (the international-match corpus that feeds `fit-ratings`;
+`data/eloratings_adapter.py` is a deprecated fallback now that scalar Elo is corpus-derived).
+Odds are a snapshot that moves continuously, and the live tournament's Elo moves as the corpus
+grows — refresh them as the tournament runs (see the `update-tournament-data` skill).
 
 ### Provenance & the one remaining approximation
 

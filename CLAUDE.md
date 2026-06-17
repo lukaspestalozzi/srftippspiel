@@ -23,7 +23,8 @@ tippspiel diagnose          # the Claude diagnostic report (see below) -> output
 tippspiel diagnose --no-sim # fast, predictor-only (skips Monte Carlo)
 tippspiel verify            # backtest the predictor against a completed tournament -> output/verify.{md,json}
 tippspiel tune              # sweep predictor params vs the completed-tournament backtests -> output/tune.{md,json}
-tippspiel fit-offdef        # fit per-team offensive/defensive Elo from history -> teams.csv att_elo/def_elo
+tippspiel fit-ratings       # fit scalar + offensive/defensive Elo from the corpus -> teams.csv elo/att_elo/def_elo
+                            #   (was `fit-offdef`, kept as a deprecated alias)
 ```
 
 Each tournament is **one config file**, selected with `--config <file>` (default `config.yaml`
@@ -81,16 +82,40 @@ Note: knockout results are the **120-minute** scoreline, so `ko_goal_scale` lift
 goal rate (applied in `EloPoissonPredictor.predict` when `match.stage.is_knockout`); host
 advantage applies when a team plays in its own country (`venue_country == home.team_id`).
 
+## One corpus, two derivations (Elo + results)
+
+The committed match corpus `tippspiel/data/historical/international_results.csv` (Mart Jürisoo's
+men's dataset, 1872–present) is the **single source of truth** for both Elo and tournament
+scorelines. `tippspiel fit-ratings` computes *all three* `teams.csv` columns from it at the
+tournament's `snapshot_date`: the scalar `elo` (World-Football-Elo update, `training/scalar_elo.py`)
+and `att_elo`/`def_elo` (below). Per-tournament `results.csv` is **thin** —
+`match_id,date,winner_team_id` — and its scoreline is **resolved from the corpus** at load time by
+date + the fixture's teams (`data/corpus_results.py`, called from `FileDataProvider.get_results`;
+`winner_team_id` is the knockout penalty-shootout winner only). `get_results` is dual-mode: a row
+with inline `home_goals,away_goals` is used as-is (synthetic test data), else it's a corpus
+reference. `scripts/migrate_results_to_corpus_refs.py` did the one-off conversion.
+
+**Scalar Elo source is per-config** via `elo.source: corpus | external` (default `external`):
+`config.yaml` (live wc2026) uses `corpus` → **no more eloratings.net fetching**. The completed
+benchmarks and `womenseuro2025` use `external` → `fit-ratings` writes only att/def and leaves the
+committed `elo` untouched. Why: a from-scratch corpus fit is measurably *less* calibrated than
+eloratings on the backtests (~2pp/tournament, ~4% worse RPS — eloratings encodes more signal), so
+the `verify`/`tune` baselines stay on their frozen external snapshots; and the men's corpus can't
+rate women's teams at all. The corpus-Elo defaults (`k_scale 1.4`, `home_advantage 60` in the
+`elo:` block, vs canonical 1.0/100) are **calibrated against those backtests** to close the live
+gap as far as a from-scratch fit can. `eloratings_diff.py` is now an offline calibration check
+(corpus-Elo vs eloratings, Spearman ~0.98 on wc2026), not a refresh path.
+
 ## Offensive/defensive Elo (goal-volume layer)
 
 A single scalar `Team.elo` fixes the goal **ratio** (who wins) but pins every match's **total**
 goals to `mu`. Per-team `att_elo`/`def_elo` add the missing volume dimension. `tippspiel
-fit-offdef` learns them from the full international match-goal history (Mart Jürisoo's dataset,
+fit-ratings` learns them from the full international match-goal history (Mart Jürisoo's dataset,
 committed at `tippspiel/data/historical/international_results.csv`, 1872–present) with an online,
 Elo-style update on **goals** (`tippspiel/training/offdef_elo.py`): for each match, chronologically,
 `att += k·w·(goals_scored − λ̂)` and `def -= k·w·(goals_conceded − λ̂)` where `λ̂ = (μ/2)·exp(att−def+γ)`
 — i.e. SGD on the Poisson NLL. Matches are FIFA-importance-weighted (`w`: friendly ×0.5, qualifier
-×2.5, continental ×3, World Cup ×4; `tippspiel/data/historical_results_adapter.py`). `fit-offdef`
+×2.5, continental ×3, World Cup ×4; `tippspiel/data/historical_results_adapter.py`). `fit-ratings`
 snapshots ratings as of the **day before the tournament's first kickoff** (so `verify` stays
 leak-free) and writes the `att_elo,def_elo` columns into that tournament's `teams.csv`; they
 default to 0 when absent. Convention: higher `att_elo` = scores more; higher `def_elo` = concedes
@@ -158,7 +183,8 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
   config file (`load_tournament` → `TournamentBundle`).
 - `tippspiel/report/backtest.py` — the `verify` historical backtest.
 - `tippspiel/training/` — offline model-fitting (not the hot path). `offdef_elo.py` is the
-  online Elo-for-goals fitter behind `fit-offdef`.
+  online Elo-for-goals fitter behind `fit-ratings`; `offdef_elo.py`'s sibling `scalar_elo.py` is
+  the World-Football-Elo scalar fitter (`elo.source: corpus`).
 - `tippspiel/data/tournaments/<name>/` — per-tournament data (teams/fixtures/results + optional
   `thirds_allocation.json`); `historical_stats.py` holds sourced reference stats (top-scorer
   prior + validation bands). `data/historical/international_results.csv` is the committed

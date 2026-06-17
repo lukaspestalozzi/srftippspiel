@@ -219,15 +219,20 @@ def run_tuning(base_cfg: Config, benchmark_configs, *, top: int = 15, grid=None)
     return {"paths": paths, "data": data}
 
 
-def write_offdef_snapshot(
-    bundle: TournamentBundle, offdef_block: dict | None = None, *, dry_run: bool = False
+def write_ratings_snapshot(
+    bundle: TournamentBundle,
+    offdef_block: dict | None = None,
+    elo_block: dict | None = None,
+    *,
+    dry_run: bool = False,
 ) -> dict:
-    """Fit offensive/defensive Elo from the historical corpus and persist it to teams.csv.
+    """Fit scalar + offensive/defensive Elo from the historical corpus and persist to teams.csv.
 
-    Fits ``att_elo``/``def_elo`` for every team in the corpus from all matches **strictly
-    before** the tournament's first kickoff (so a ``verify`` backtest stays leak-free), then
-    writes the subset mapping to this tournament's teams back into its ``teams.csv`` (preserving
-    the existing columns). Returns a small stats dict for the CLI to print.
+    Fits a scalar World-Football-Elo rating (``elo``) and ``att_elo``/``def_elo`` for every team
+    in the corpus from all matches **strictly before** the tournament's first kickoff (so a
+    ``verify`` backtest stays leak-free), then writes those three columns for this tournament's
+    teams into its ``teams.csv`` (preserving any other columns). One corpus load feeds both fits.
+    Returns a small stats dict for the CLI to print.
 
     ``dry_run=True`` skips the fit and the ``teams.csv`` write entirely; instead it returns the
     corpus matches within 5 days of ``snapshot_date`` tagged ``included`` (corpus date <
@@ -238,14 +243,17 @@ def write_offdef_snapshot(
 
     from .data.historical_results_adapter import (
         DEFAULT_CORPUS,
+        KTiers,
         WeightTiers,
         corpus_name_for,
         load_corpus,
         ratings_for_team,
     )
     from .training.offdef_elo import OffDefParams, OffDefRating, fit_off_def
+    from .training.scalar_elo import ScalarEloParams, fit_scalar_elo
 
     block = dict(offdef_block or {})
+    eblock = dict(elo_block or {})
     params = OffDefParams(
         mu=float(block.get("mu", OffDefParams.mu)),
         k_att=float(block.get("k_att", OffDefParams.k_att)),
@@ -254,6 +262,11 @@ def write_offdef_snapshot(
         residual_cap=float(block.get("residual_cap", OffDefParams.residual_cap)),
         epochs=int(block.get("epochs", OffDefParams.epochs)),
     )
+    elo_params = ScalarEloParams(
+        start_rating=float(eblock.get("start_rating", ScalarEloParams.start_rating)),
+        home_advantage=float(eblock.get("home_advantage", ScalarEloParams.home_advantage)),
+        k_scale=float(eblock.get("k_scale", ScalarEloParams.k_scale)),
+    )
     w = block.get("weights", {}) or {}
     tiers = WeightTiers(
         friendly=float(w.get("friendly", WeightTiers.friendly)),
@@ -261,6 +274,14 @@ def write_offdef_snapshot(
         continental=float(w.get("continental", WeightTiers.continental)),
         world_cup=float(w.get("world_cup", WeightTiers.world_cup)),
         default=float(w.get("default", WeightTiers.default)),
+    )
+    kw = eblock.get("k_tiers", {}) or {}
+    k_tiers = KTiers(
+        friendly=float(kw.get("friendly", KTiers.friendly)),
+        qualifier=float(kw.get("qualifier", KTiers.qualifier)),
+        minor=float(kw.get("minor", KTiers.minor)),
+        continental=float(kw.get("continental", KTiers.continental)),
+        world_cup=float(kw.get("world_cup", KTiers.world_cup)),
     )
     corpus_path = block.get("corpus_file", DEFAULT_CORPUS)
 
@@ -271,7 +292,7 @@ def write_offdef_snapshot(
     if dry_run:
         snapshot_date = date.fromisoformat(snapshot)
         near_cutoff = []
-        for m in load_corpus(before=None, corpus_path=corpus_path, tiers=tiers):
+        for m in load_corpus(before=None, corpus_path=corpus_path, tiers=tiers, k_tiers=k_tiers):
             try:
                 match_date = date.fromisoformat(m.date)
             except ValueError:
@@ -282,39 +303,54 @@ def write_offdef_snapshot(
         near_cutoff.sort(key=lambda row: row[0])
         return {"dry_run": True, "snapshot_date": snapshot, "near_cutoff": near_cutoff}
 
-    matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers)
+    matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers, k_tiers=k_tiers)
     ratings = fit_off_def(matches, params)
+    # `elo.source: corpus` derives the scalar elo from the corpus too; `external` (default) leaves
+    # the committed `elo` column untouched (a frozen eloratings/women's snapshot the men's corpus
+    # can't reproduce — completed benchmarks and womenseuro2025). Off/def is always corpus-fitted.
+    elo_source = str(eblock.get("source", "external")).strip().lower()
+    elo = fit_scalar_elo(matches, elo_params) if elo_source == "corpus" else {}
 
     teams = provider.get_teams()
     by_id: dict[str, OffDefRating] = {}
+    elo_by_id: dict[str, float] = {}
     unmapped: list[str] = []
     for t in teams:
         by_id[t.team_id] = ratings_for_team(t.name, ratings)
-        if corpus_name_for(t.name) not in ratings:
+        corpus_name = corpus_name_for(t.name)
+        if corpus_name in elo:
+            elo_by_id[t.team_id] = elo[corpus_name]
+        if corpus_name not in ratings:
             unmapped.append(t.name)
 
-    _write_teams_csv_with_offdef(bundle.teams_file, by_id, _csv)
+    _write_teams_csv_with_ratings(bundle.teams_file, by_id, elo_by_id, _csv)
 
     ranked_att = sorted(teams, key=lambda t: by_id[t.team_id].att, reverse=True)
     ranked_def = sorted(teams, key=lambda t: by_id[t.team_id].def_, reverse=True)
+    ranked_elo = sorted(
+        (t for t in teams if t.team_id in elo_by_id),
+        key=lambda t: elo_by_id[t.team_id], reverse=True,
+    )
     return {
         "snapshot_date": snapshot,
+        "elo_source": elo_source,
         "corpus_matches": len(matches),
         "corpus_teams": len(ratings),
         "teams_written": len(teams),
         "unmapped": unmapped,
+        "top_elo": [(t.name, elo_by_id[t.team_id]) for t in ranked_elo[:5]],
         "top_attack": [(t.name, by_id[t.team_id].att) for t in ranked_att[:5]],
         "top_defence": [(t.name, by_id[t.team_id].def_) for t in ranked_def[:5]],
     }
 
 
-def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
-    """Rewrite teams.csv with att_elo/def_elo columns appended, preserving existing columns."""
+def _write_teams_csv_with_ratings(teams_file, by_id, elo_by_id, _csv) -> None:
+    """Rewrite teams.csv with elo/att_elo/def_elo columns, preserving any other columns."""
     with open(teams_file, newline="", encoding="utf-8") as fh:
         reader = _csv.DictReader(fh)
         fieldnames = list(reader.fieldnames or [])
         rows = list(reader)
-    for col in ("att_elo", "def_elo"):
+    for col in ("elo", "att_elo", "def_elo"):
         if col not in fieldnames:
             fieldnames.append(col)
     for row in rows:
@@ -323,6 +359,8 @@ def _write_teams_csv_with_offdef(teams_file, by_id, _csv) -> None:
         if r is not None:
             row["att_elo"] = f"{r.att:.4f}"
             row["def_elo"] = f"{r.def_:.4f}"
+        if tid in elo_by_id:
+            row["elo"] = f"{elo_by_id[tid]:.0f}"
     with open(teams_file, "w", newline="", encoding="utf-8") as fh:
         writer = _csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()

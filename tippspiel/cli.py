@@ -5,7 +5,7 @@
     tippspiel diagnose       write the Claude diagnostic report (markdown + JSON)
     tippspiel verify         backtest the predictor against a completed tournament (pool points)
     tippspiel validate-data  check input files for schema/consistency errors
-    tippspiel fit-offdef     fit offensive/defensive Elo from history into teams.csv
+    tippspiel fit-ratings    fit scalar + offensive/defensive Elo from history into teams.csv
 
 Each tournament is one config file; select it with ``--config <file>`` (default
 ``config.yaml``, FIFA World Cup 2026; further tournaments under ``configs/<name>.yaml``).
@@ -17,13 +17,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import load_config, load_offdef_block, load_tournament
+from .config import load_config, load_elo_block, load_offdef_block, load_tournament
 from .data.file_provider import FileDataProvider
 from .pipeline import (
     run_pipeline,
     run_tuning,
     write_diagnostics,
-    write_offdef_snapshot,
+    write_ratings_snapshot,
     write_report,
     write_verification,
 )
@@ -122,20 +122,25 @@ def _cmd_tune(cfg, benchmark_configs, top: int, market: bool = False) -> int:
     return 0
 
 
-def _cmd_fit_offdef(bundle, config_path, *, dry_run: bool = False) -> int:
-    stats = write_offdef_snapshot(bundle, load_offdef_block(config_path), dry_run=dry_run)
+def _cmd_fit_ratings(bundle, config_path, *, dry_run: bool = False) -> int:
+    stats = write_ratings_snapshot(
+        bundle, load_offdef_block(config_path), load_elo_block(config_path), dry_run=dry_run
+    )
     if stats.get("dry_run"):
-        print(f"[{bundle.display_name}] offdef snapshot_date = {stats['snapshot_date']} "
+        print(f"[{bundle.display_name}] ratings snapshot_date = {stats['snapshot_date']} "
               f"(corpus dates < snapshot_date are INcluded in the fit)")
         for match_date, home, away, hg, ag, included in stats["near_cutoff"]:
             mark = "IN " if included else "OUT"
             print(f"  {mark} {match_date}  {home} {hg}-{ag} {away}")
         return 0
-    print(f"[{bundle.display_name}] off/def Elo fitted from {stats['corpus_matches']:,} matches "
-          f"before {stats['snapshot_date']} ({stats['corpus_teams']} corpus teams); "
-          f"wrote att_elo/def_elo for {stats['teams_written']} teams.")
+    cols = "att_elo/def_elo" if stats["elo_source"] != "corpus" else "elo/att_elo/def_elo"
+    print(f"[{bundle.display_name}] Elo fitted from {stats['corpus_matches']:,} matches before "
+          f"{stats['snapshot_date']} ({stats['corpus_teams']} corpus teams); wrote {cols} for "
+          f"{stats['teams_written']} teams (elo source: {stats['elo_source']}).")
     if stats["unmapped"]:
         print(f"  WARN unmapped (defaulted to 0): {', '.join(stats['unmapped'])}")
+    if stats["top_elo"]:
+        print("  top elo:     " + ", ".join(f"{n} {v:.0f}" for n, v in stats["top_elo"]))
     print("  top attack:  " + ", ".join(f"{n} {v:+.2f}" for n, v in stats["top_attack"]))
     print("  top defence: " + ", ".join(f"{n} {v:+.2f}" for n, v in stats["top_defence"]))
     return 0
@@ -198,10 +203,23 @@ def validate_data(bundle) -> list[str]:
 
     errors.extend(_validate_knockout(fixtures, sorted(by_group), provider))
 
+    # Results: every row must resolve (inline scoreline or a unique corpus match — the resolver
+    # raises otherwise), and a knockout penalty winner must be one of the fixture's participants.
     try:
-        provider.get_results()
+        results = provider.get_results()
     except Exception as exc:  # noqa: BLE001
-        errors.append(f"results file unreadable: {exc}")
+        results = []
+        errors.append(f"results unresolved: {exc}")
+    fixtures_by_id = {m.match_id: m for m in fixtures}
+    for r in results:
+        if not r.winner_team_id:
+            continue
+        fx = fixtures_by_id.get(r.match_id)
+        if fx and fx.home.is_concrete and fx.away.is_concrete:
+            if r.winner_team_id not in (fx.home.team_id, fx.away.team_id):
+                errors.append(
+                    f"{r.match_id}: winner_team_id {r.winner_team_id} is not a participant"
+                )
 
     return errors
 
@@ -263,15 +281,19 @@ def main(argv: list[str] | None = None) -> int:
     _add_common_args(diag, with_default=False)
     diag.add_argument("--no-sim", action="store_true",
                       help="skip Monte Carlo (fast, predictor-only diagnostics)")
-    fitoffdef = sub.add_parser(
-        "fit-offdef", help="fit offensive/defensive Elo from history -> teams.csv att_elo/def_elo"
-    )
-    _add_common_args(fitoffdef, with_default=False)
-    fitoffdef.add_argument(
-        "--dry-run", action="store_true",
-        help="print which corpus matches fall inside/outside the snapshot_date cutoff "
-             "without writing teams.csv",
-    )
+    # `fit-ratings` (scalar + off/def Elo from the corpus); `fit-offdef` kept as a back-compat
+    # alias for one release (the update-tournament-data skill + muscle memory reference it).
+    for fit_name, fit_help in [
+        ("fit-ratings", "fit scalar + off/def Elo from history -> teams.csv elo/att_elo/def_elo"),
+        ("fit-offdef", "alias of fit-ratings (deprecated)"),
+    ]:
+        fitparser = sub.add_parser(fit_name, help=fit_help)
+        _add_common_args(fitparser, with_default=False)
+        fitparser.add_argument(
+            "--dry-run", action="store_true",
+            help="print which corpus matches fall inside/outside the snapshot_date cutoff "
+                 "without writing teams.csv",
+        )
     tune = sub.add_parser("tune", help="sweep predictor params against completed-tournament backtests")
     _add_common_args(tune, with_default=False)
     tune.add_argument("--benchmarks", metavar="PATH", nargs="+", default=DEFAULT_BENCHMARKS,
@@ -304,8 +326,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_verify(cfg, bundle)
         if args.command == "validate-data":
             return _cmd_validate(cfg, bundle)
-        if args.command == "fit-offdef":
-            return _cmd_fit_offdef(bundle, config_path, dry_run=args.dry_run)
+        if args.command in ("fit-ratings", "fit-offdef"):
+            return _cmd_fit_ratings(bundle, config_path, dry_run=args.dry_run)
         if args.command == "diagnose":
             return _cmd_diagnose(cfg, bundle, simulate=not args.no_sim)
         if args.command == "tune":

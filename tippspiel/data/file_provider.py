@@ -24,6 +24,11 @@ def _opt_float(raw: str | None) -> float:
     return float(s) if s else 0.0
 
 
+def _is_corpus_ref(row: dict) -> bool:
+    """A results row references the corpus when it carries no inline scoreline (the thin form)."""
+    return not ((row.get("home_goals") or "").strip() and (row.get("away_goals") or "").strip())
+
+
 def _parse_kickoff(raw: str) -> datetime:
     s = raw.strip().replace("Z", "+00:00")
     dt = datetime.fromisoformat(s)
@@ -53,6 +58,7 @@ class FileDataProvider(DataProvider):
         results_file: str | Path,
         thirds_allocation_file: str | Path | None = None,
         odds_file: str | Path | None = None,
+        corpus_file: str | Path | None = None,
     ) -> None:
         self.teams_file = Path(teams_file)
         self.fixtures_file = Path(fixtures_file)
@@ -61,6 +67,9 @@ class FileDataProvider(DataProvider):
             Path(thirds_allocation_file) if thirds_allocation_file else None
         )
         self.odds_file = Path(odds_file) if odds_file else None
+        # The match corpus that thin (scoreline-less) results.csv rows reference; defaults to the
+        # committed international-results corpus when not overridden (retro_tips pins a commit blob).
+        self.corpus_file = Path(corpus_file) if corpus_file else None
 
     def get_teams(self) -> list[Team]:
         teams: list[Team] = []
@@ -103,17 +112,52 @@ class FileDataProvider(DataProvider):
         return fixtures
 
     def get_results(self) -> list[Result]:
+        """Played results, keyed by match_id.
+
+        Two row forms are accepted per row (dual-mode): an **inline** scoreline
+        (``home_goals``/``away_goals`` columns present — synthetic test data and legacy files) or
+        a **corpus reference** (``date`` column, no scoreline) resolved against the match corpus by
+        date + the fixture's teams (the de-duplicated form, see ``corpus_results``). The corpus
+        index, fixtures and team names are built lazily, only if some row needs resolving.
+        """
         if not self.results_file.exists():
             return []
-        results: list[Result] = []
         with self.results_file.open(newline="", encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                if not row.get("match_id"):
-                    continue
-                winner = (row.get("winner_team_id") or "").strip() or None
+            rows = [r for r in csv.DictReader(fh) if r.get("match_id")]
+
+        needs_corpus = any(_is_corpus_ref(r) for r in rows)
+        if needs_corpus:
+            from .corpus_results import (
+                DEFAULT_CORPUS,
+                build_corpus_index,
+                resolve_corpus_result,
+            )
+
+            index = build_corpus_index(self.corpus_file or DEFAULT_CORPUS)
+            fixtures_by_id = {m.match_id: m for m in self.get_fixtures()}
+            name_by_id = {t.team_id: t.name for t in self.get_teams()}
+
+        results: list[Result] = []
+        for row in rows:
+            mid = row["match_id"].strip()
+            winner = (row.get("winner_team_id") or "").strip() or None
+            hg, ag = (row.get("home_goals") or "").strip(), (row.get("away_goals") or "").strip()
+            if bool(hg) != bool(ag):
+                raise ValueError(
+                    f"{mid}: partial inline scoreline — set both home_goals and away_goals, "
+                    f"or neither (a corpus reference)"
+                )
+            if _is_corpus_ref(row):
+                results.append(
+                    resolve_corpus_result(
+                        mid, (row.get("date") or "").strip(), winner,
+                        fixtures_by_id, name_by_id, index,
+                    )
+                )
+            else:
                 results.append(
                     Result(
-                        match_id=row["match_id"].strip(),
+                        match_id=mid,
                         home_goals=int(row["home_goals"]),
                         away_goals=int(row["away_goals"]),
                         winner_team_id=winner,

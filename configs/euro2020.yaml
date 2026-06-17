@@ -26,6 +26,12 @@ report:
 strategy:
   realism_tolerance: 0.15   # realistic tips; 0 = strict EV (see config.yaml)
 
+# Scalar base Elo: keep the committed eloratings snapshot (pre-tournament, leak-free). A
+# from-scratch corpus fit is measurably less calibrated than eloratings on the backtests, so the
+# verify/tune baseline stays on the external snapshot; only the live wc2026 uses source: corpus.
+elo:
+  source: external
+
 tournament:
   name: euro2020
   display_name: UEFA Euro 2020

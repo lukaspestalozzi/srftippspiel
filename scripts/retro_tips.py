@@ -44,6 +44,9 @@ from tippspiel.pipeline import build_predictor  # noqa: E402
 from tippspiel.strategy.expected_points import best_tip, score_tip  # noqa: E402
 
 DATA_FILES = ("teams.csv", "fixtures.csv", "results.csv", "odds.csv")
+# The match corpus thin results.csv rows resolve against; pinned per-commit so a replayed
+# snapshot reads the corpus *as it was then*, never leaking a later-appended score.
+CORPUS_REL = "tippspiel/data/historical/international_results.csv"
 
 
 def _git(*args: str) -> str:
@@ -96,10 +99,15 @@ def _load_snapshot(commit: str, cfg, data_rel: str):
         blob = _blob(commit, f"{src_dir}/{fname}")
         if blob is not None:
             (dest / fname).write_text(blob, encoding="utf-8")
+    corpus_blob = _blob(commit, CORPUS_REL)
+    corpus_path = Path(tmp) / "international_results.csv"
+    if corpus_blob is not None:
+        corpus_path.write_text(corpus_blob, encoding="utf-8")
     bundle = load_tournament(cfg.config_path, data_root=Path(tmp))
     provider = FileDataProvider(
         bundle.teams_file, bundle.fixtures_file, bundle.results_file,
         bundle.thirds_allocation_file, bundle.odds_file,
+        corpus_file=corpus_path if corpus_blob is not None else None,
     )
     teams = {t.team_id: t for t in provider.get_teams()}
     fixtures = {m.match_id: m for m in provider.get_fixtures()}
@@ -122,10 +130,15 @@ def main() -> int:
     results_rel = f"tippspiel/data/{data_rel}/results.csv"
     realism = cfg.strategy.realism_tolerance
 
-    actual: dict[str, tuple[int, int]] = {}
-    with open(bundle.results_file, encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            actual[row["match_id"]] = (int(row["home_goals"]), int(row["away_goals"]))
+    # Actual scorelines come from the *current* data (thin results.csv resolve against the
+    # latest corpus, which has every played score) -- knowing the real result is not a leak.
+    provider_now = FileDataProvider(
+        bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+        bundle.thirds_allocation_file, bundle.odds_file,
+    )
+    actual: dict[str, tuple[int, int]] = {
+        r.match_id: (r.home_goals, r.away_goals) for r in provider_now.get_results()
+    }
     if not actual:
         print("No played matches yet -- nothing to retrospect.")
         return 0
