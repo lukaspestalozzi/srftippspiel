@@ -137,6 +137,29 @@ def load_elo_block(path: str | Path) -> dict:
     return dict(raw.get("elo", {}) or {})
 
 
+def write_offdef_snapshot_date(config_path: str | Path, iso_date: str) -> bool:
+    """Set ``offdef.snapshot_date`` to ``iso_date`` via a comment-preserving single-line edit.
+
+    Used by the live-update tooling to advance the cutoff to the day after the latest played match
+    without round-tripping the YAML (which would drop comments). Returns True if the file changed.
+    """
+    import re
+
+    path = Path(config_path)
+    text = path.read_text(encoding="utf-8")
+    new, n = re.subn(
+        r"(?m)^(\s*snapshot_date:\s*)\S.*?(\s*(?:#.*)?)$",
+        rf'\g<1>"{iso_date}"\g<2>',
+        text,
+    )
+    if n == 0:
+        raise ValueError(f"no 'snapshot_date:' line found in {config_path}")
+    if new == text:
+        return False
+    path.write_text(new, encoding="utf-8")
+    return True
+
+
 def load_tournament(path: str | Path, *, data_root: Path = _DATA_ROOT) -> TournamentBundle:
     """Parse the ``tournament:`` block (+ ``bonus_questions:``) of a config file.
 
