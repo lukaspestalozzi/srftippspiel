@@ -10,7 +10,7 @@ predictor:
   # the `tippspiel tune` result and feed the fallback unchanged.
   name: market_odds
   params:
-    market_weight: 0.5         # market share of the log-linear pool on gated fixtures
+    market_weight: 0.6         # market share of the log-linear pool on gated fixtures
     match_draw: true           # expansion also matches the de-vigged draw price
     divergence_threshold: 0.15 # gate: pure model below this model-vs-market 1X2 gap
     total_goals: 2.6           # expansion's assumed total when match_draw is false
