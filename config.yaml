@@ -37,10 +37,10 @@ offdef:
   epochs: 3              # chronological passes over the corpus
   residual_cap: 5.0      # clamp on a single match's goal residual (dampens blowouts)
   weights: { friendly: 0.5, qualifier: 2.5, continental: 3.0, world_cup: 4.0, default: 1.0 }
-  # Live tournament: include the played results (11-14 June matchdays) in the off/def fit. The
+  # Live tournament: include the played results (11-16 June matchdays) in the off/def fit. The
   # default snapshot (day before first kickoff) is for leak-free backtests; wc2026 is live, not a
   # benchmark, so we deliberately fold in the games already played.
-  snapshot_date: "2026-06-16"
+  snapshot_date: "2026-06-17"
 
 simulation:
   iterations: 500000   # max per-team MC standard error = 0.5/sqrt(n) ~= 0.07pp; ~30s/run
@@ -65,7 +65,7 @@ tournament:
   display_name: FIFA World Cup 2026
   completed: false        # not yet played; results.csv is conditioned on as it fills
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "eloratings.net 16 June 2026 (men; 8 Elo movers this run: ESP/CPV (matchday-1 carry-over, ESP-CPV 0-0 15 Jun, now processed by eloratings) plus BEL/EGY (BEL-EGY 1-1), IRN/NZL (IRN-NZL 2-2) and SAU/URU (SAU-URU 1-1), all played 15 Jun. Those three results added to results.csv & corpus; off/def re-fitted. snapshot_date stays 16 Jun (day after the latest played matchday, 15 Jun). Odds re-fetched from ESPN (played G_G_1/G_H_2 dropped, several upcoming fixtures re-priced).)"
+  elo_source: "eloratings.net 17 June 2026 (men; 8 Elo movers this run: FRA/SEN (FRA-SEN 3-1), IRQ/NOR (IRQ-NOR 1-4), ARG/ALG (ARG-ALG 3-0) and AUT/JOR (AUT-JOR 3-1), all played 16 Jun (Group I & J matchday 1). Those four results added to results.csv & corpus; off/def re-fitted. snapshot_date bumped to 17 Jun (day after the latest played matchday, 16 Jun). Odds re-fetched from ESPN (played fixtures dropped, several upcoming fixtures re-priced).)"
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. An explicit third-place combination->slot table can be added
