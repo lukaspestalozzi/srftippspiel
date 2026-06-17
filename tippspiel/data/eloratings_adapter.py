@@ -1,8 +1,14 @@
 """Adapter: eloratings.net World.tsv-style export -> teams.csv schema (spec §6.1.2).
 
-eloratings.net is the upstream Elo source. Its export columns vary; this adapter maps
-the common form (rank, name, rating, ...) to our `team_id,name,elo` schema.
-A name->team_id mapping must be supplied because eloratings uses full country names.
+DEPRECATED (kept one release as an escape hatch). Scalar base `elo` is now derived from the
+committed match corpus via `tippspiel fit-ratings` (`elo.source: corpus`, see
+`tippspiel/training/scalar_elo.py`), so nothing on the runtime path fetches eloratings.net any
+more. This converter only matters if you fall back to seeding a tournament's `elo` column from an
+eloratings export; the live wc2026 and all benchmarks no longer use it.
+
+eloratings.net was the upstream Elo source. Its export columns vary; this adapter maps the common
+form (rank, name, rating, ...) to our `team_id,name,elo` schema. A name->team_id mapping must be
+supplied because eloratings uses full country names.
 """
 
 from __future__ import annotations

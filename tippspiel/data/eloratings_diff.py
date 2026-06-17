@@ -1,5 +1,10 @@
 """Maintainer tool: diff ``teams.csv`` base elo against eloratings.net's current ratings.
 
+Now a **calibration check**, not a data source: base elo is derived from the committed corpus
+(``tippspiel fit-ratings``), and this tool confirms the corpus-fitted scalar Elo tracks
+eloratings.net (the wc2026 fit scored Spearman ~0.98; expect a benign uniform offset because the
+predictor uses Elo *differences*). It no longer drives any data refresh.
+
 Offline, **not on the runtime path** (mirrors ``espn_odds_fetch`` / ``eloratings_adapter``).
 eloratings.net publishes its current rating table and a code->name lookup as plain
 tab-separated files (``World.tsv``, ``en.teams.tsv``) fetchable with a browser ``User-Agent``

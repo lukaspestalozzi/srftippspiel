@@ -55,7 +55,13 @@ class OffDefParams:
 
 @dataclass(frozen=True)
 class HistMatch:
-    """One historical match in the fitting corpus (already name-resolved + weighted)."""
+    """One historical match in the fitting corpus (already name-resolved + weighted).
+
+    Carries two independent importance signals derived from the corpus competition label:
+    ``weight`` (the off/def goal-fit weight, see ``WeightTiers``) and ``k_importance`` (the
+    World-Football-Elo K base for the scalar-Elo fit, see ``scalar_elo``). ``k_importance``
+    defaults to 0 so records built without it leave the scalar fitter inert.
+    """
 
     date: str  # ISO yyyy-mm-dd; used only for chronological ordering
     home: str
@@ -64,6 +70,7 @@ class HistMatch:
     away_goals: int
     weight: float
     neutral: bool
+    k_importance: float = 0.0
 
 
 @dataclass(frozen=True)

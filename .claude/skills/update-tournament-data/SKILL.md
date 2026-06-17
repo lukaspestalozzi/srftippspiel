@@ -7,25 +7,33 @@ description: >-
   update/refresh odds, add the latest results, update Elo after games are played,
   fill in newly-posted WC2026 matches, or otherwise bring a live tournament's inputs
   up to date. Covers sourcing results from the web, the ESPN JSON endpoints +
-  espn_odds_fetch tool, the eloratings.net TSV data feed (World.tsv / latest.tsv)
-  with the update formula as fallback, re-running fit-offdef, validation, and the
-  known gotchas.
+  espn_odds_fetch tool, appending played scores to the match corpus and re-running
+  fit-ratings (which derives elo + att/def from the corpus — no more eloratings.net
+  fetching), validation, and the known gotchas.
 ---
 
 # Update live-tournament data (results, odds, Elo)
 
 When a matchday has been played in a **live** tournament (e.g. `wc2026`, `completed: false`),
-three input files need refreshing, in this order:
+refresh the inputs in this order:
 
-1. **`results.csv`** — add the full-time scores of the games that have kicked off.
-2. **`odds.csv`** — re-fetch market odds (newly-priced upcoming matches appear; played ones drop —
-   `espn_odds_fetch.py` filters fixtures already in `results.csv`).
-3. **`teams.csv`** Elo — bump the base `elo` of the teams that played, then re-run `fit-offdef`.
+1. **The match corpus** `tippspiel/data/historical/international_results.csv` — fill in the
+   full-time score of each played match (the rows are usually already present with `NA,NA`;
+   set `home_score,away_score`). This is now the single source of truth for both Elo and scorelines.
+2. **`results.csv`** — add a **thin** row per played match: `match_id,date,winner_team_id` (the
+   `date` is the corpus match date; `winner_team_id` only for a knockout penalty shootout). The
+   scoreline is read from the corpus, never restated here.
+3. **`odds.csv`** — re-fetch market odds (`espn_odds_fetch.py` filters fixtures already in
+   `results.csv`).
+4. **`teams.csv`** Elo — advance `offdef.snapshot_date` to the day after the latest played corpus
+   date, then run **`tippspiel fit-ratings --config config.yaml`**. With `elo.source: corpus`
+   (wc2026) this recomputes `elo` + `att_elo` + `def_elo` from the grown corpus in one step — **no
+   eloratings.net fetch**.
 
-Sourcing convention (decided 2026-06): **fetch the real-world data from the web** (results via
-search, odds via the ESPN feed below, Elo via the eloratings.net TSV feed), and for Elo update the
-**base `elo` and re-run `fit-offdef`** so att/def shift too. Never invent numbers — every value
-must trace to a fetched source or the published eloratings formula.
+Sourcing convention: **fetch real-world results from the web** and write them into the corpus;
+`fit-ratings` derives every Elo column. Never invent numbers — every score must trace to a fetched
+source. (The eloratings.net TSV flow below is retained only as a deprecated fallback / the
+`eloratings_diff` calibration check.)
 
 The report already renders a played match with its **pre-match prediction (tip, forecast, data
 table) plus the actual result added** — so once `results.csv` is updated, no report change is
@@ -186,49 +194,48 @@ Elo in `teams.csv`.
   `build_verification(...)` under `predictor.name=market_odds` vs `elo_poisson` (compare
   `calibration.all.mean_rps`).
 
-## Results (results.csv)
+## Results (corpus score + thin results.csv)
 
-`results.csv` (`match_id,home_goals,away_goals,winner_team_id`) lists the games already played; the
-engine **conditions** on them (the simulator uses the actual scoreline; the report shows them with
-their pre-match tip). Schema: group matches leave `winner_team_id` **blank**; it is only needed for
-a knockout decided by penalties (the 120-minute scoreline goes in the goal columns, the
-shootout winner's `team_id` in the last column). Goals are the **full-time 90-minute** score for
-group games.
+`results.csv` is now **thin**: `match_id,date,winner_team_id`. The scoreline lives in the corpus
+(`international_results.csv`) and is resolved at load time by the match date + the fixture's teams
+(`data/corpus_results.py`); the simulator still conditions on the resolved score and the report
+still shows it with its pre-match tip. `winner_team_id` is **blank** except for a knockout decided
+by penalties (the shootout winner's `team_id`; the 120-minute scoreline stays in the corpus).
 
 Procedure:
 
 1. **Find which fixtures have kicked off.** Read `fixtures.csv` and compare each `kickoff_utc` to
-   the current time. Only add matches whose kickoff has genuinely passed — adding a not-yet-played
-   match injects future info into the sim.
-2. **Fetch each full-time score from the web** and **dual-source** it (e.g. ESPN + FIFA/CNN) before
-   writing — this is the one place a transcription error silently propagates into standings.
-   `python -m tippspiel.data.espn_results_fetch <tournament> <espn_league_slug>` prints candidate
-   rows for every finished, unrecorded fixture from the same ESPN scoreboard feed as the odds tool
-   (one of the two sources, not a replacement for dual-sourcing); `--write` appends them to
-   `results.csv` after you've checked them. Knockout matches level after 90' are flagged on stderr
-   — fill `winner_team_id` in by hand once you know the shootout result.
-3. **Orient home/away to the fixture.** Match the fixture's `home_ref`/`away_ref`; write
-   `home_goals` as the repo home team's goals. Append the row(s) to `results.csv`.
+   the current time. Only add matches whose kickoff has genuinely passed.
+2. **Fetch each full-time score from the web** and **dual-source** it (e.g. ESPN + FIFA/CNN), then
+   **write the score into the corpus** `international_results.csv` (the WC2026 rows are usually
+   already present with `NA,NA` — set `home_score,away_score`; match by date + teams). A
+   transcription error here propagates into both standings and the Elo fit, so dual-source it.
+3. **Add the thin `results.csv` row**: `match_id,<corpus_date>,<winner_or_blank>`. Orientation is
+   handled automatically (the resolver re-orients the corpus score to the fixture's home/away), so
+   you do not restate goals. Corpus dates are **local** match dates and can differ from
+   `kickoff_utc` by a day — use the corpus row's date.
 
-Example (WC2026 matchday 1): `G_A_1` Mexico 2–0 South Africa → `G_A_1,2,0,` and `G_A_2`
-South Korea 2–1 Czechia → `G_A_2,2,1,`.
+Example (WC2026 matchday 1): corpus gets `2026-06-11,Mexico,South Africa,2,0,FIFA World Cup,...`,
+and `results.csv` gets `G_A_1,2026-06-11,`. Run `tippspiel validate-data` — it asserts every
+results row resolves to exactly one corpus match.
 
-## Elo (teams.csv base elo + att/def)
+## Elo (corpus-derived via fit-ratings)
 
-After a matchday only the teams that **played** have moved on eloratings.net; the rest are
-unchanged from the committed snapshot. Don't rewrite all 48 rows — update just the movers, in
-place, preserving the `att_elo`/`def_elo` columns.
-
-**Quick start:**
+Elo is no longer fetched. After writing the matchday's scores into the corpus (above), advance
+`offdef.snapshot_date` in `config.yaml` to the day after the latest played corpus date and run:
 
 ```bash
-python -m tippspiel.data.eloratings_diff <tournament>
+tippspiel fit-ratings --config config.yaml
 ```
 
-This fetches eloratings.net's `World.tsv` + `en.teams.tsv`, maps eloratings' 2-letter codes to
-`team_id`s via `teams.csv`, restricts to the teams that **played** (per `results.csv`/
-`fixtures.csv`), and prints one line per team whose rating changed: `<team_id> <old_elo> ->
-<new_elo>`. Copy the printed new values into `teams.csv`.
+With `elo.source: corpus` this recomputes **`elo` + `att_elo` + `def_elo`** for all 48 teams from
+the grown corpus (deterministic, single command). The scalar `elo` uses the calibrated
+World-Football-Elo defaults (`k_scale 1.4`, `home_advantage 60`) in the `elo:` block.
+
+**Optional calibration check (offline, network):** `python -m tippspiel.data.eloratings_diff
+wc2026` compares the corpus-fitted `elo` against eloratings.net (expect Spearman ~0.98 + a benign
+uniform offset; the predictor uses Elo *differences*). It no longer drives the update — it only
+confirms the fit hasn't drifted. The legacy eloratings TSV fetch below is a deprecated fallback.
 
 A one-line summary is **always** printed to stderr, even when nothing moved, e.g. `"0 movers; 2
 played teams already up-to-date; 1 not yet processed (unmapped or no rating yet): CV"` — silent

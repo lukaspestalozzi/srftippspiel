@@ -42,6 +42,17 @@ offdef:
   # benchmark, so we deliberately fold in the games already played.
   snapshot_date: "2026-06-17"
 
+# Scalar base Elo. `source: corpus` derives `elo` from the same committed match corpus via the
+# World-Football-Elo update (no more eloratings.net fetching) -- the live tournament's Elo now
+# moves only when the corpus grows. The defaults (k_scale 1.4, home_advantage 60) are calibrated
+# against the completed-tournament backtests, not the canonical 1.0/100 (a from-scratch fit
+# compresses the spread; see CLAUDE.md). Completed benchmarks + womenseuro2025 use `source:
+# external` (keep their committed snapshot; the men's corpus can't reproduce them).
+elo:
+  source: corpus
+  k_scale: 1.4
+  home_advantage: 60
+
 simulation:
   iterations: 500000   # max per-team MC standard error = 0.5/sqrt(n) ~= 0.07pp; ~30s/run
   seed: 20260611
