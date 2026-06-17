@@ -7,16 +7,18 @@ predictor's ``k`` is tuned for.
 
 Per match, in chronological order::
 
-    dr = (R_home + home_adv) - R_away          # home_adv = 100 unless neutral venue
+    dr = (R_home + home_adv) - R_away          # home_adv = params.home_advantage (0 if neutral)
     We = 1 / (1 + 10 ** (-dr / 400))           # expected home score (0..1)
-    W  = 1.0 / 0.5 / 0.0                        # actual home result (win/draw/loss)
+    W  = 1 (win) / 0.5 (draw) / 0 (loss)        # actual home result
     G  = goal-difference multiplier            # 1, 1.5, or (11+gd)/8 for gd >= 3
     delta = K * G * (W - We)                    # K = match importance (friendly 20 .. WC 60)
     R_home += delta ; R_away -= delta           # zero-sum
 
 Unlike the off/def fit, this is a **single chronological pass** (classical Elo's "current
 rating" is path-dependent; epochs would corrupt it) and the ratings are **not zero-centred** —
-the absolute level *is* the rating. Deterministic: same corpus + params -> same ratings.
+the absolute level *is* the rating. Order-independent: matches are sorted by a content key
+(date, then teams + goals), so the same corpus + params -> the same ratings regardless of input
+order, even for matches sharing a date.
 
 Run by ``tippspiel fit-ratings`` (alongside the off/def fit); snapshotting to a cutoff date
 keeps a ``verify`` backtest leak-free exactly as the off/def fit does.
@@ -60,10 +62,12 @@ def fit_scalar_elo(
 ) -> dict[str, float]:
     """Fit a scalar Elo rating for every team appearing in ``matches``.
 
-    Deterministic: matches are sorted by date (stable), so the same corpus + params always yield
-    the same ratings. Returns ``team_name -> rating`` (not zero-centred)."""
+    Order-independent: matches are sorted by a content key (date, then teams + goals), so the same
+    corpus + params always yield the same ratings regardless of input order — including matches
+    that share a date (Elo is path-dependent, so date alone is not a stable order). Returns
+    ``team_name -> rating`` (not zero-centred)."""
     params = params or ScalarEloParams()
-    ordered = sorted(matches, key=lambda m: m.date)
+    ordered = sorted(matches, key=lambda m: (m.date, m.home, m.away, m.home_goals, m.away_goals))
     rating: dict[str, float] = defaultdict(lambda: params.start_rating)
 
     for m in ordered:

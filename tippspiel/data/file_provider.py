@@ -141,6 +141,12 @@ class FileDataProvider(DataProvider):
         for row in rows:
             mid = row["match_id"].strip()
             winner = (row.get("winner_team_id") or "").strip() or None
+            hg, ag = (row.get("home_goals") or "").strip(), (row.get("away_goals") or "").strip()
+            if bool(hg) != bool(ag):
+                raise ValueError(
+                    f"{mid}: partial inline scoreline — set both home_goals and away_goals, "
+                    f"or neither (a corpus reference)"
+                )
             if _is_corpus_ref(row):
                 results.append(
                     resolve_corpus_result(

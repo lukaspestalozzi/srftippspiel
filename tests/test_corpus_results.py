@@ -55,6 +55,12 @@ def test_not_found_raises():
         resolve_corpus_result("M", "2022-11-21", None, fixtures, names, index)
 
 
+def test_blank_date_raises():
+    fixtures, names, index = _ctx()
+    with pytest.raises(ResultResolutionError, match="missing a date"):
+        resolve_corpus_result("M", "", None, fixtures, names, index)
+
+
 def test_ambiguous_raises():
     fixtures, names, _ = _ctx()
     index = {("2022-11-20", frozenset(("Qatar", "Ecuador"))): [("Qatar", 0, 2), ("Qatar", 1, 1)]}
@@ -114,3 +120,18 @@ def test_provider_dual_mode(tmp_path):
     by_id = {r.match_id: r for r in provider.get_results()}
     assert (by_id["G_A_1"].home_goals, by_id["G_A_1"].away_goals) == (0, 2)  # resolved
     assert (by_id["G_A_2"].home_goals, by_id["G_A_2"].away_goals) == (3, 1)  # inline
+
+
+def test_partial_inline_scoreline_raises(tmp_path):
+    # Exactly one of home_goals/away_goals populated is a schema error, caught up front.
+    (tmp_path / "teams.csv").write_text("team_id,name,elo\nQAT,Qatar,1500\nECU,Ecuador,1600\n",
+                                        encoding="utf-8")
+    (tmp_path / "fixtures.csv").write_text(
+        "match_id,stage,group,home_ref,away_ref,kickoff_utc,venue_country\n"
+        "G_A_1,GROUP,A,QAT,ECU,2022-11-20T16:00:00Z,QAT\n", encoding="utf-8")
+    (tmp_path / "results.csv").write_text(
+        "match_id,date,home_goals,away_goals,winner_team_id\nG_A_1,,2,,\n", encoding="utf-8")
+    provider = FileDataProvider(
+        tmp_path / "teams.csv", tmp_path / "fixtures.csv", tmp_path / "results.csv")
+    with pytest.raises(ValueError, match="partial inline scoreline"):
+        provider.get_results()

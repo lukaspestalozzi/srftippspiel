@@ -34,6 +34,14 @@ def test_determinism_and_order_independence():
     assert fit_scalar_elo(a) == fit_scalar_elo(b)
 
 
+def test_same_date_order_independence():
+    # Matches sharing a date must still be order-independent (the content secondary sort key);
+    # Elo is path-dependent, so a date-only sort would let input order change the result.
+    a = [_m("A", "B", 2, 0, date="2020-01-01"), _m("C", "D", 1, 0, date="2020-01-01"),
+         _m("A", "C", 0, 1, date="2020-01-01")]
+    assert fit_scalar_elo(a) == fit_scalar_elo(list(reversed(a)))
+
+
 def test_goal_difference_amplifies():
     narrow = fit_scalar_elo([_m("A", "B", 1, 0)])
     blowout = fit_scalar_elo([_m("A", "B", 5, 0)])

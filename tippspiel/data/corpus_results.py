@@ -54,6 +54,10 @@ def resolve_corpus_result(
     index: dict[tuple[str, frozenset[str]], list[tuple[str, int, int]]],
 ) -> Result:
     """Resolve one thin results row to a ``Result`` by joining against the corpus index."""
+    if not date:
+        raise ResultResolutionError(
+            f"results row {match_id!r}: corpus reference is missing a date"
+        )
     fx = fixtures_by_id.get(match_id)
     if fx is None:
         raise ResultResolutionError(f"results row {match_id!r} has no matching fixture")
