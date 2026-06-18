@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tippspiel.data.corpus_update import (
@@ -51,6 +51,16 @@ from tippspiel.data.historical_results_adapter import DEFAULT_CORPUS, corpus_nam
 _THIN_FIELDS = ["match_id", "date", "winner_team_id"]
 
 
+def _date_window(yyyymmdd: str) -> list[str]:
+    """``[day-1, day, day+1]`` as ``YYYYMMDD``. ESPN files a match under its *local* date, which can
+    be the day before a late-UTC kickoff at a western venue (e.g. WC2026 G_K_2 UZB-COL kicks off
+    ``…T02:00:00Z`` but ESPN lists it the prior local day). Searching this window keeps the
+    scoreboard lookup as offset-tolerant as the ±1-day corpus join, so such a match isn't skipped.
+    """
+    day = datetime.strptime(yyyymmdd, "%Y%m%d").date()
+    return [(day + timedelta(days=delta)).strftime("%Y%m%d") for delta in (-1, 0, 1)]
+
+
 def _score(competitor: dict) -> str | None:
     raw = competitor.get("score")
     if isinstance(raw, dict):
@@ -72,12 +82,13 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
         f for f in load_concrete_fixtures(tdir)
         if f["match_id"] not in played and f["kickoff_utc"] < now
     ]
-    scoreboard = fetch_scoreboard(slug, sorted({f["date"] for f in candidates}))
+    scoreboard = fetch_scoreboard(slug, sorted({d for f in candidates for d in _date_window(f["date"])}))
 
     rows, not_final, missing, shootout_watch = [], [], [], []
     for f in candidates:
         try:
-            found = find_event(scoreboard.get(f["date"], []), teams, f["home_id"], f["away_id"])
+            events = [e for d in _date_window(f["date"]) for e in scoreboard.get(d, [])]
+            found = find_event(events, teams, f["home_id"], f["away_id"])
             if found is None:
                 missing.append(f["match_id"])
                 continue
