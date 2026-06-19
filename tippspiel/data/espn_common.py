@@ -28,6 +28,7 @@ ALIASES = {
     "cabo verde": "cape verde",
     "congo dr": "dr congo",
     "bosnia & herzegovina": "bosnia and herzegovina",
+    "bosnia-herzegovina": "bosnia and herzegovina",
     "turkey": "türkiye",
     "czech republic": "czechia",
 }
