@@ -40,7 +40,7 @@ offdef:
   # Live tournament: include the played results (11-16 June matchdays) in the off/def fit. The
   # default snapshot (day before first kickoff) is for leak-free backtests; wc2026 is live, not a
   # benchmark, so we deliberately fold in the games already played.
-  snapshot_date: "2026-06-23"
+  snapshot_date: "2026-06-24"
 
 # Scalar base Elo. `source: corpus` derives `elo` from the same committed match corpus via the
 # World-Football-Elo update (no more eloratings.net fetching) -- the live tournament's Elo now
