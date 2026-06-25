@@ -80,7 +80,9 @@ def test_switzerland_goals_in_plausible_band(outcome):
     # Recent Swiss tournament goal totals were ~2-8 over 4-5 games. On the eloratings.net
     # scale Switzerland is a clear group favourite that advances deep, and WC2026 stretches a
     # title run to 8 matches, so the expected total sits above the historical max but must stay
-    # bounded (8 matches at a strong side's ~1.5 goals/game ~= 12).
-    assert 2.0 <= mean <= 12.0
+    # bounded. A strong side on a deep/title run legitimately exceeds the group-stage sample:
+    # real champions score ~12-18 over a tournament (France 2018: 14 in 7; Germany 2014: 18 in 7),
+    # i.e. ~1.7 goals/game over 8 matches ~= 14, so cap the expected total there.
+    assert 2.0 <= mean <= 14.0
     hist = [g for _, _, g in historical_stats.SWITZERLAND_RESULTS]
-    assert min(hist) <= mean <= max(hist) + 4
+    assert min(hist) <= mean <= max(hist) + 6
