@@ -48,9 +48,14 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     assert not re.search(r'<(script|link|img)[^>]*(src|href)=[\"\']https?://', html)
     # Champion recommendation present.
     assert result["tipset"].bonus_answers.get("champion")
-    for section in ("Group-stage fixtures", "Group advancement", "Title odds", "Bonus",
-                    "Model L/D/W", "Expected goals", "Top scorelines", "Why this tip"):
+    for section in ("Group-stage fixtures", "Group standings", "Group advancement", "Title odds",
+                    "Bonus", "Model L/D/W", "Expected goals", "Top scorelines", "Why this tip"):
         assert section in html
+    # Group standings: finished Group A shows Mexico through with 9 points.
+    standings = {s["letter"]: s for s in result["context"]["group_standings"]}
+    top = standings["A"]["rows"][0]
+    assert top["team"] == "Mexico" and top["points"] == 9 and top["qualified"]
+    assert "✓ through" in html
 
 
 def test_market_odds_tips_in_report(tmp_path, small_cfg):

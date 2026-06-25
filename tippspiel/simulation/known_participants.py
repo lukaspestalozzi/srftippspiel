@@ -18,36 +18,67 @@ The simulator is untouched: it keeps operating on the raw reference fixtures.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 
 from ..model.types import Match, Result, TeamRef
 from .bracket import Bracket
-from .standings import _h2h_table, compute_stats
+from .standings import _h2h_table
 from .thirds import select_best_thirds
 
 
-def _determined_placings(
-    pts_row: np.ndarray,
-    gd_row: np.ndarray,
-    gf_row: np.ndarray,
-    home_row: np.ndarray,
-    away_row: np.ndarray,
-    layout: list[tuple[int, int]],
-    nteams: int,
-) -> list[int | None]:
-    """Rank a completed group by FIFA criteria points -> GD -> GF -> head-to-head.
+@dataclass(frozen=True)
+class TeamStanding:
+    """One team's row in a group table, computed from the matches played so far."""
 
-    Returns a list of length ``nteams``: the local team index at each rank (0 = winner), or
-    ``None`` where a tie survives all derivable criteria (so the placing is *not* determined).
+    team_id: str
+    rank: int  # 1-based position within the group (display order)
+    played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_diff: int
+    points: int
+    # True only when the group is complete *and* this rank is strictly settled by the derivable
+    # FIFA criteria (points -> GD -> GF -> head-to-head) — i.e. not in a tie that would need
+    # fair-play/lots. The knockout resolver fills a slot only from a ``placing_certain`` row.
+    placing_certain: bool
+
+
+@dataclass(frozen=True)
+class GroupStanding:
+    letter: str
+    complete: bool  # every group match has a recorded result
+    rows: tuple[TeamStanding, ...]  # ordered best (rank 1) to worst
+
+
+def _rank_and_flag(
+    points: list[int],
+    gd: list[int],
+    gf: list[int],
+    sub_layout: list[tuple[int, int]],
+    home_row: list[int],
+    away_row: list[int],
+    glob: list[str],
+    complete: bool,
+) -> list[tuple[int, bool]]:
+    """Order a group's teams by FIFA criteria points -> GD -> GF -> head-to-head, breaking any
+    residual tie by ``team_id`` for a stable total order.
+
+    Returns ``(local_idx, placing_certain)`` per rank. ``placing_certain`` is True only when the
+    group is complete and the position is strictly separated (singleton on primary, then on
+    head-to-head); a surviving tie is ordered by ``team_id`` and flagged not-certain.
     """
 
     def primary(t: int) -> tuple[int, int, int]:
-        return (int(pts_row[t]), int(gd_row[t]), int(gf_row[t]))
+        return (points[t], gd[t], gf[t])
 
+    nteams = len(points)
     by_primary = sorted(range(nteams), key=primary, reverse=True)
-    result: list[int | None] = [None] * nteams
+    out: list[tuple[int, bool]] = []
     i = 0
     while i < nteams:
         j = i
@@ -55,22 +86,24 @@ def _determined_placings(
             j += 1
         block = by_primary[i:j]
         if len(block) == 1:
-            result[i] = block[0]
+            out.append((block[0], complete))
         else:
             # Criterion 4: head-to-head among the tied teams only.
-            h2h = _h2h_table(block, home_row, away_row, layout)
+            h2h = _h2h_table(block, home_row, away_row, sub_layout)
             ranked = sorted(block, key=lambda t: h2h[t], reverse=True)
             p = 0
             while p < len(ranked):
                 q = p
                 while q < len(ranked) and h2h[ranked[q]] == h2h[ranked[p]]:
                     q += 1
-                # A singleton sub-block is determined; a surviving tie stays None.
-                if q - p == 1:
-                    result[i + p] = ranked[p]
+                sub = ranked[p:q]
+                if len(sub) == 1:
+                    out.append((sub[0], complete))
+                else:  # genuine tie (needs fair-play/lots): order by team_id, not certain
+                    out.extend((t, False) for t in sorted(sub, key=lambda t: glob[t]))
                 p = q
         i = j
-    return result
+    return out
 
 
 def _group_layouts(fixtures: list[Match]) -> dict[str, dict]:
@@ -89,36 +122,96 @@ def _group_layouts(fixtures: list[Match]) -> dict[str, dict]:
     return layouts
 
 
-def _resolve_groups(
+def compute_group_standings(
     fixtures: list[Match], results: dict[str, Result]
-) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, tuple[int, int, int]]]:
-    """Determined group placings from the played results.
+) -> list[GroupStanding]:
+    """Current group tables from the matches played so far — one ``GroupStanding`` per group,
+    sorted by group letter, each carrying its teams ordered by the FIFA tiebreakers.
 
-    Returns (winner, runner_up, third) mapping group letter -> team_id (only where determined),
-    plus ``third_stats`` mapping group letter -> the third-placed team's (pts, gd, gf) — present
-    only for a group whose third place is itself determined.
+    This is the shared calculation step: the report renders these tables and the knockout resolver
+    reads the certain placings off them (see ``_placings_from_standings``).
+    """
+    layouts = _group_layouts(fixtures)
+    standings: list[GroupStanding] = []
+    for letter in sorted(layouts):
+        info = layouts[letter]
+        ms, layout, glob = info["matches"], info["layout"], info["global"]
+        nteams = len(glob)
+        played = [0] * nteams
+        wins = [0] * nteams
+        draws = [0] * nteams
+        losses = [0] * nteams
+        gf = [0] * nteams
+        ga = [0] * nteams
+        points = [0] * nteams
+        sub_layout: list[tuple[int, int]] = []
+        home_row: list[int] = []
+        away_row: list[int] = []
+        for j, m in enumerate(ms):
+            if m.match_id not in results:
+                continue
+            r = results[m.match_id]
+            h, a = layout[j]
+            hg, ag = r.home_goals, r.away_goals
+            sub_layout.append((h, a))
+            home_row.append(hg)
+            away_row.append(ag)
+            played[h] += 1
+            played[a] += 1
+            gf[h] += hg
+            ga[h] += ag
+            gf[a] += ag
+            ga[a] += hg
+            if hg > ag:
+                wins[h] += 1
+                losses[a] += 1
+                points[h] += 3
+            elif hg < ag:
+                wins[a] += 1
+                losses[h] += 1
+                points[a] += 3
+            else:
+                draws[h] += 1
+                draws[a] += 1
+                points[h] += 1
+                points[a] += 1
+        gd = [gf[t] - ga[t] for t in range(nteams)]
+        complete = all(m.match_id in results for m in ms)
+        order = _rank_and_flag(points, gd, gf, sub_layout, home_row, away_row, glob, complete)
+        rows = tuple(
+            TeamStanding(
+                team_id=glob[t], rank=rank, played=played[t],
+                wins=wins[t], draws=draws[t], losses=losses[t],
+                goals_for=gf[t], goals_against=ga[t], goal_diff=gd[t],
+                points=points[t], placing_certain=certain,
+            )
+            for rank, (t, certain) in enumerate(order, start=1)
+        )
+        standings.append(GroupStanding(letter=letter, complete=complete, rows=rows))
+    return standings
+
+
+def _placings_from_standings(
+    standings: list[GroupStanding],
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, tuple[int, int, int]]]:
+    """Certain group placings for the knockout resolver, read off the standings tables.
+
+    Returns (winner, runner_up, third) mapping group letter -> team_id (only where the placing is
+    certain), plus ``third_stats`` (pts, gd, gf) for each group whose third place is itself certain.
     """
     winner: dict[str, str] = {}
     runner: dict[str, str] = {}
     third: dict[str, str] = {}
     third_stats: dict[str, tuple[int, int, int]] = {}
-    for letter, info in _group_layouts(fixtures).items():
-        ms, layout, glob = info["matches"], info["layout"], info["global"]
-        if not all(m.match_id in results for m in ms):
-            continue  # group still in progress
-        hg = np.array([[results[m.match_id].home_goals for m in ms]], dtype=np.int64)
-        ag = np.array([[results[m.match_id].away_goals for m in ms]], dtype=np.int64)
-        nteams = len(glob)
-        pts, gd, gf = compute_stats(hg, ag, layout, nteams)
-        order = _determined_placings(pts[0], gd[0], gf[0], hg[0], ag[0], layout, nteams)
-        if order[0] is not None:
-            winner[letter] = glob[order[0]]
-        if order[1] is not None:
-            runner[letter] = glob[order[1]]
-        if len(order) > 2 and order[2] is not None:
-            t = order[2]
-            third[letter] = glob[t]
-            third_stats[letter] = (int(pts[0, t]), int(gd[0, t]), int(gf[0, t]))
+    for g in standings:
+        rows = g.rows
+        if len(rows) > 0 and rows[0].placing_certain:
+            winner[g.letter] = rows[0].team_id
+        if len(rows) > 1 and rows[1].placing_certain:
+            runner[g.letter] = rows[1].team_id
+        if len(rows) > 2 and rows[2].placing_certain:
+            third[g.letter] = rows[2].team_id
+            third_stats[g.letter] = (rows[2].points, rows[2].goal_diff, rows[2].goals_for)
     return winner, runner, third, third_stats
 
 
@@ -165,16 +258,23 @@ def resolve_known_participants(
     fixtures: list[Match],
     results: dict[str, Result],
     thirds_allocation: dict | None = None,
+    standings: list[GroupStanding] | None = None,
 ) -> list[Match]:
     """Return a copy of ``fixtures`` with knockout references replaced by concrete teams wherever
-    the played results already determine them. Group fixtures and still-open slots are untouched."""
+    the played results already determine them. Group fixtures and still-open slots are untouched.
+
+    ``standings`` may be supplied (from ``compute_group_standings``) to avoid recomputing the group
+    tables; when omitted they are computed here. The certain placings drive which slots are filled.
+    """
     ko_matches = [m for m in fixtures if m.group is None]
     # A completed tournament lists concrete knockout participants (no references), so there is
     # nothing to resolve — and a Bracket cannot be built from such a fixed bracket. Short-circuit.
     if not any(side.ko_ref for m in ko_matches for side in (m.home, m.away)):
         return list(fixtures)
 
-    winner, runner, third, third_stats = _resolve_groups(fixtures, results)
+    if standings is None:
+        standings = compute_group_standings(fixtures, results)
+    winner, runner, third, third_stats = _placings_from_standings(standings)
     group_letters = sorted({m.group for m in fixtures if m.group})
 
     third_slot_team: dict[int, str] = {}

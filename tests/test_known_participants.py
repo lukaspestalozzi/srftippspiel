@@ -11,7 +11,10 @@ from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.model.stages import Stage
 from tippspiel.model.types import Match, Result, TeamRef
 from tippspiel.predictors.elo_poisson import EloPoissonPredictor
-from tippspiel.simulation.known_participants import resolve_known_participants
+from tippspiel.simulation.known_participants import (
+    compute_group_standings,
+    resolve_known_participants,
+)
 from tippspiel.simulation.simulator import TournamentSimulator
 
 REPO = Path(tippspiel.__file__).parent.parent
@@ -51,6 +54,34 @@ def test_finished_groups_fill_their_knockout_slots(wc2026):
         assert known.team_id == team
         assert not other.is_concrete  # opponent not decided yet
         assert not m.participants_known
+
+
+def test_group_standings_finished_group(wc2026):
+    fixtures, results, _teams, _thirds = wc2026
+    standings = {g.letter: g for g in compute_group_standings(fixtures, results)}
+    a = standings["A"]
+    assert a.complete
+    # Group A finished: MEX 9, RSA 4, KOR 3, CZE 1 — strictly separated, all placings certain.
+    assert [(r.team_id, r.points) for r in a.rows] == [
+        ("MEX", 9), ("RSA", 4), ("KOR", 3), ("CZE", 1)]
+    mex = a.rows[0]
+    assert (mex.played, mex.wins, mex.draws, mex.losses) == (3, 3, 0, 0)
+    assert (mex.goals_for, mex.goals_against, mex.goal_diff) == (6, 0, 6)
+    assert all(r.placing_certain for r in a.rows)
+
+
+def test_group_standings_in_progress_group(wc2026):
+    fixtures, results, _teams, _thirds = wc2026
+    standings = {g.letter: g for g in compute_group_standings(fixtures, results)}
+    d = standings["D"]  # only 4 of 6 matches played
+    assert not d.complete
+    assert sum(r.played for r in d.rows) == 2 * sum(
+        1 for m in fixtures if m.group == "D" and m.match_id in results)
+    assert all(not r.placing_certain for r in d.rows)  # provisional, nothing settled
+    # Ranks are a 1..n permutation in points-descending order.
+    assert [r.rank for r in d.rows] == [1, 2, 3, 4]
+    pts = [r.points for r in d.rows]
+    assert pts == sorted(pts, reverse=True)
 
 
 def test_undetermined_slots_are_left_untouched(wc2026):
