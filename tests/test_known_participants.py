@@ -97,6 +97,21 @@ def test_unbreakable_tie_leaves_placing_open():
     assert not k1.away.is_concrete and k1.away.ko_ref.kind == "runner_up"
 
 
+def test_completed_tournament_bracket_is_left_unchanged():
+    # A completed tournament lists concrete knockout participants (no references). The resolver
+    # must not try to build a Bracket from that fixed bracket (which is rightly rejected) — it is
+    # a no-op. Regression for the predict-<completed> CI jobs.
+    bundle = load_tournament(REPO / "configs" / "wc2022.yaml")
+    prov = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file,
+                            bundle.thirds_allocation_file)
+    fixtures = prov.get_fixtures()
+    results = {r.match_id: r for r in prov.get_results()}
+    resolved = resolve_known_participants(fixtures, results, prov.get_thirds_allocation())
+    assert len(resolved) == len(fixtures)
+    for before, after in zip(fixtures, resolved):
+        assert before.home == after.home and before.away == after.away
+
+
 def test_resolved_team_matches_simulator_certainty(wc2026):
     # Every team the resolver fixes must be the one the simulator advances with probability 1.0
     # (a completed group's standings are identical in every iteration).

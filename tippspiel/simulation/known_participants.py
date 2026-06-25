@@ -168,12 +168,21 @@ def resolve_known_participants(
 ) -> list[Match]:
     """Return a copy of ``fixtures`` with knockout references replaced by concrete teams wherever
     the played results already determine them. Group fixtures and still-open slots are untouched."""
-    winner, runner, third, third_stats = _resolve_groups(fixtures, results)
     ko_matches = [m for m in fixtures if m.group is None]
+    # A completed tournament lists concrete knockout participants (no references), so there is
+    # nothing to resolve — and a Bracket cannot be built from such a fixed bracket. Short-circuit.
+    if not any(side.ko_ref for m in ko_matches for side in (m.home, m.away)):
+        return list(fixtures)
+
+    winner, runner, third, third_stats = _resolve_groups(fixtures, results)
     group_letters = sorted({m.group for m in fixtures if m.group})
 
     third_slot_team: dict[int, str] = {}
-    if ko_matches and group_letters:
+    has_third_ref = any(
+        side.ko_ref is not None and side.ko_ref.kind == "third_pooled"
+        for m in ko_matches for side in (m.home, m.away)
+    )
+    if group_letters and has_third_ref:
         third_slot_team = _resolve_third_slots(
             ko_matches, group_letters, thirds_allocation, third, third_stats
         )
