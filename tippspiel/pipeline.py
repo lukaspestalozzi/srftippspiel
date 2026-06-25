@@ -14,6 +14,7 @@ from .predictors.elo_poisson import EloPoissonPredictor
 from .predictors.market_odds import MarketOddsPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
+from .simulation.known_participants import resolve_known_participants
 from .strategy.bonus import build_bonus_questions
 from .strategy.expected_points import (
     ExpectedPointsStrategy,
@@ -88,6 +89,7 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
     odds = provider.get_odds()
+    thirds_allocation = provider.get_thirds_allocation()
 
     predictor = build_predictor(cfg, odds=odds)
     strategy = build_strategy(cfg, bundle)
@@ -101,12 +103,17 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
             teams=teams,
             results=results,
             predictor=predictor,
-            thirds_allocation=provider.get_thirds_allocation(),
+            thirds_allocation=thirds_allocation,
             iterations=cfg.simulation.iterations,
             seed=cfg.simulation.seed,
             penalty_model=cfg.simulation.penalty_model,
         )
         outcome = sim.run()
+
+    # Fill knockout slots whose participant the played results already determine, so the report
+    # shows the set teams (and tips the now-known matches). The simulator above stays on the raw
+    # reference fixtures; resolution is for the predict/tip/report path only.
+    fixtures = resolve_known_participants(fixtures, results, thirds_allocation)
 
     predictions = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(predictions, outcome, fixtures)

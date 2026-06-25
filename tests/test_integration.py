@@ -25,8 +25,12 @@ def small_cfg():
 
 def test_predict_only_pipeline(small_cfg):
     result = run_pipeline(small_cfg, BUNDLE, simulate=False)
-    # 72 group fixtures, all tippable, no simulation-dependent bonus answers required.
-    assert len(result["tipset"].tips) == 72
+    tips = result["tipset"].tips
+    # All 72 group fixtures are tippable; no simulation-dependent bonus answers required.
+    assert sum(1 for mid in tips if mid.startswith("G_")) == 72
+    # Knockout fixtures the played results already decide are tipped too (groups A/B/C are
+    # finished, so M73 = runner-up A vs runner-up B = RSA vs CAN is known).
+    assert "M73" in tips
     assert result["outcome"] is None
 
 
@@ -73,7 +77,7 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     # The de-vigged 1X2 row appears in the data table for exactly those two fixtures.
     assert html.count("Market (de-vigged)") == 2
     # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
-    assert len(result["tipset"].tips) == 72
+    assert sum(1 for mid in result["tipset"].tips if mid.startswith("G_")) == 72
 
 
 def _with_alpha(cfg, alpha):
