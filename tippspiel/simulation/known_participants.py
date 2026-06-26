@@ -24,7 +24,7 @@ import numpy as np
 
 from ..model.types import Match, Result, TeamRef
 from .bracket import Bracket
-from .standings import _h2h_table
+from .standings import h2h_table
 from .thirds import select_best_thirds
 
 
@@ -89,7 +89,7 @@ def _rank_and_flag(
             out.append((block[0], complete))
         else:
             # Criterion 4: head-to-head among the tied teams only.
-            h2h = _h2h_table(block, home_row, away_row, sub_layout)
+            h2h = h2h_table(block, home_row, away_row, sub_layout)
             ranked = sorted(block, key=lambda t: h2h[t], reverse=True)
             p = 0
             while p < len(ranked):
