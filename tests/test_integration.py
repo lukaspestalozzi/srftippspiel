@@ -25,8 +25,12 @@ def small_cfg():
 
 def test_predict_only_pipeline(small_cfg):
     result = run_pipeline(small_cfg, BUNDLE, simulate=False)
-    # 72 group fixtures, all tippable, no simulation-dependent bonus answers required.
-    assert len(result["tipset"].tips) == 72
+    tips = result["tipset"].tips
+    # All 72 group fixtures are tippable; no simulation-dependent bonus answers required.
+    assert sum(1 for mid in tips if mid.startswith("G_")) == 72
+    # Knockout fixtures the played results already decide are tipped too (groups A/B/C are
+    # finished, so M73 = runner-up A vs runner-up B = RSA vs CAN is known).
+    assert "M73" in tips
     assert result["outcome"] is None
 
 
@@ -44,9 +48,21 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     assert not re.search(r'<(script|link|img)[^>]*(src|href)=[\"\']https?://', html)
     # Champion recommendation present.
     assert result["tipset"].bonus_answers.get("champion")
-    for section in ("Group-stage fixtures", "Group advancement", "Title odds", "Bonus",
-                    "Model L/D/W", "Expected goals", "Top scorelines", "Why this tip"):
+    for section in ("Group-stage fixtures", "Group standings", "Group advancement", "Title odds",
+                    "Bonus", "Model L/D/W", "Expected goals", "Top scorelines", "Why this tip"):
         assert section in html
+    # Group standings: finished Group A shows Mexico through with 9 points.
+    standings = {s["letter"]: s for s in result["context"]["group_standings"]}
+    top = standings["A"]["rows"][0]
+    assert top["team"] == "Mexico" and top["points"] == 9 and top["qualified"]
+    assert "✓ through" in html
+    # A partially-resolved knockout fixture shows the decided side's team name, not "None"
+    # (a concrete side's TeamRef.placeholder is None — must fall back to the team name).
+    ko = {b["match_id"]: b for b in result["context"]["knockout_fixtures"]}
+    assert ko["M76"]["home"] == "Brazil" and ko["M76"]["away"] == "Runner-up Group F"
+    assert ko["M75"]["away"] == "Morocco"
+    ko_html = html[html.find('id="knockout"'):html.find('id="title"')]
+    assert "None" not in ko_html
 
 
 def test_market_odds_tips_in_report(tmp_path, small_cfg):
@@ -73,7 +89,7 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     # The de-vigged 1X2 row appears in the data table for exactly those two fixtures.
     assert html.count("Market (de-vigged)") == 2
     # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
-    assert len(result["tipset"].tips) == 72
+    assert sum(1 for mid in result["tipset"].tips if mid.startswith("G_")) == 72
 
 
 def _with_alpha(cfg, alpha):

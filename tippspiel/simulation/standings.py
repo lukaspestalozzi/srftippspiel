@@ -59,10 +59,13 @@ def break_remaining_ties(tied: list[int], rand_keys: np.ndarray) -> list[int]:
     return sorted(tied, key=lambda t: rand_keys[t])
 
 
-def _h2h_table(
+def h2h_table(
     subset: list[int], home_row: np.ndarray, away_row: np.ndarray, layout: Layout
 ) -> dict[int, tuple[int, int, int]]:
-    """Head-to-head (pts, gd, gf) for one iteration, over matches among `subset` only."""
+    """Head-to-head (pts, gd, gf) for one iteration, over matches among `subset` only.
+
+    Public helper: the vectorised standings path (``_order_block``) and the deterministic report
+    resolver (``known_participants``) both rank tied teams through this same head-to-head table."""
     s = set(subset)
     pts = {t: 0 for t in subset}
     gf = {t: 0 for t in subset}
@@ -119,7 +122,7 @@ def _resolve_tied_row(
 
 def _order_block(block, home_row, away_row, layout, rand_row) -> list[int]:
     """Order a set of teams tied on (pts, gd, gf): head-to-head, then random."""
-    h2h = _h2h_table(block, home_row, away_row, layout)
+    h2h = h2h_table(block, home_row, away_row, layout)
     ranked = sorted(block, key=lambda t: h2h[t], reverse=True)
     # Resolve any sub-groups still tied on H2H with the random tiebreak.
     out: list[int] = []

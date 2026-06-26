@@ -53,6 +53,14 @@
   table.kv { border-collapse:collapse; font-size:.9rem; }
   table.kv td { padding:2px 10px 2px 0; }
   table.kv th { padding:2px 10px 2px 0; text-align:left; color:var(--muted); font-weight:600; }
+  table.standings { border-collapse:collapse; font-size:.9rem; width:100%; }
+  table.standings th { text-align:right; color:var(--muted); font-weight:600; padding:4px 8px;
+                       border-bottom:1px solid var(--line); }
+  table.standings td { text-align:right; padding:4px 8px; border-bottom:1px solid var(--line); }
+  table.standings th.team, table.standings td.team { text-align:left; }
+  table.standings td.pts { font-weight:700; }
+  table.standings tr.q td { background:#f3f9f4; }
+  .through { color:#1a7f37; font-weight:700; margin-left:6px; }
   .fixture-data { margin:10px 0 4px; font-size:.85rem; }
   .fixture-data table.kv th { white-space:nowrap; vertical-align:top; }
   .fixture-data .sub { color:var(--muted); }
@@ -83,6 +91,7 @@
     <b>Contents</b>
     <ul>
       <li><a href="#groups">Group-stage fixtures</a></li>
+      {% if group_standings %}<li><a href="#standings">Group standings</a></li>{% endif %}
       {% if advancement %}<li><a href="#advancement">Group advancement</a></li>{% endif %}
       {% if knockout_fixtures %}<li><a href="#knockout">Knockout fixtures</a></li>{% endif %}
       {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
@@ -119,6 +128,32 @@
       </div>
     </details></div>
   {% endfor %}
+
+  {% if group_standings %}
+  <h2 id="standings">Group standings</h2>
+  <p class="meta">Current tables from the results played so far, ordered by points → goal difference
+    → goals scored → head-to-head. A finished group's certain top two are marked
+    <span class="through">✓ through</span> — these are the teams that fill the knockout bracket.</p>
+  {% for s in group_standings %}
+    <div class="card"><div class="fixture-body">
+      <h3 style="margin-top:4px">Group {{ s.letter }}
+        <span class="summary-right">· {{ "complete" if s.complete else "in progress" }}</span></h3>
+      <table class="standings">
+        <tr><th class="team">#</th><th class="team">Team</th><th>P</th><th>W</th><th>D</th>
+            <th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr>
+        {% for r in s.rows %}
+        <tr{% if r.qualified %} class="q"{% endif %}>
+          <td>{{ r.rank }}</td>
+          <td class="team">{{ r.team }}{% if r.qualified %}<span class="through">✓ through</span>{% endif %}</td>
+          <td>{{ r.played }}</td><td>{{ r.wins }}</td><td>{{ r.draws }}</td><td>{{ r.losses }}</td>
+          <td>{{ r.gf }}</td><td>{{ r.ga }}</td><td>{{ "%+d"|format(r.gd) }}</td>
+          <td class="pts">{{ r.points }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div></div>
+  {% endfor %}
+  {% endif %}
 
   {% if advancement %}
   <h2 id="advancement">Group advancement</h2>

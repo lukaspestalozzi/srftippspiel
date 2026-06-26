@@ -14,6 +14,7 @@ from .predictors.elo_poisson import EloPoissonPredictor
 from .predictors.market_odds import MarketOddsPredictor
 from .report import charts
 from .report.html_writer import ReportWriter
+from .simulation.known_participants import compute_group_standings, resolve_known_participants
 from .strategy.bonus import build_bonus_questions
 from .strategy.expected_points import (
     ExpectedPointsStrategy,
@@ -88,6 +89,7 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
     fixtures = provider.get_fixtures()
     results = {r.match_id: r for r in provider.get_results()}
     odds = provider.get_odds()
+    thirds_allocation = provider.get_thirds_allocation()
 
     predictor = build_predictor(cfg, odds=odds)
     strategy = build_strategy(cfg, bundle)
@@ -101,12 +103,19 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
             teams=teams,
             results=results,
             predictor=predictor,
-            thirds_allocation=provider.get_thirds_allocation(),
+            thirds_allocation=thirds_allocation,
             iterations=cfg.simulation.iterations,
             seed=cfg.simulation.seed,
             penalty_model=cfg.simulation.penalty_model,
         )
         outcome = sim.run()
+
+    # Current group tables from the played results — the shared calculation step: the report
+    # renders them and the knockout resolver reads the certain placings off them to fill slots
+    # whose participant is already decided. The simulator above stays on the raw reference
+    # fixtures; resolution is for the predict/tip/report path only.
+    standings = compute_group_standings(fixtures, results)
+    fixtures = resolve_known_participants(fixtures, results, thirds_allocation, standings=standings)
 
     predictions = _predict_tippable(fixtures, teams, predictor)
     tipset = strategy.generate_tips(predictions, outcome, fixtures)
@@ -116,7 +125,7 @@ def _run_core(cfg: Config, bundle: TournamentBundle, *, simulate: bool) -> dict:
         "teams": teams, "fixtures": fixtures, "results": results,
         "predictions": predictions, "tipset": tipset, "outcome": outcome,
         "predictor": predictor, "market_predictions": market_predictions,
-        "odds": odds,
+        "odds": odds, "standings": standings,
     }
 
 
@@ -159,7 +168,7 @@ def run_pipeline(
     context = _build_report_context(
         cfg, bundle, core["teams"], core["fixtures"], core["results"],
         core["predictions"], core["tipset"], core["outcome"], core["predictor"],
-        core["market_predictions"], core["odds"],
+        core["market_predictions"], core["odds"], core["standings"],
     )
     return {"context": context, "tipset": core["tipset"], "outcome": core["outcome"]}
 
@@ -369,7 +378,7 @@ def _write_teams_csv_with_ratings(teams_file, by_id, elo_by_id, _csv) -> None:
 
 def _build_report_context(
     cfg, bundle, teams, fixtures, results, predictions, tipset, outcome, predictor,
-    market_predictions=None, odds=None,
+    market_predictions=None, odds=None, standings=None,
 ) -> dict:
     market_predictions = market_predictions or {}
     # The per-fixture market tip: predictions carry the scoreline (for the EV-optimal tip), and
@@ -390,6 +399,7 @@ def _build_report_context(
     group_fixtures = _group_fixture_blocks(
         teams, fixtures, results, predictions, tipset, market, alpha, realism
     )
+    group_standings = _group_standings_sections(teams, standings or [])
     advancement = _advancement_sections(teams, fixtures, outcome)
     knockout_fixtures = _knockout_sections(
         teams, fixtures, results, predictions, tipset, outcome, market, alpha, realism
@@ -420,6 +430,7 @@ def _build_report_context(
     return {
         "header": header,
         "group_fixtures": group_fixtures,
+        "group_standings": group_standings,
         "advancement": advancement,
         "knockout_fixtures": knockout_fixtures,
         "title_odds_chart": title_odds_chart,
@@ -429,11 +440,18 @@ def _build_report_context(
     }
 
 
+def _side_label(side, teams) -> str:
+    """Display label for a fixture side: the team name when concrete, else the slot placeholder
+    (``Winner Group A`` / ``3rd place (slot 74)`` / ...). A concrete side's ``placeholder`` is
+    ``None``, so a partially-resolved knockout fixture must use this rather than ``placeholder``."""
+    return teams[side.team_id].name if side.is_concrete else side.placeholder
+
+
 def _fixture_block(
     m, teams, results, predictions, tipset, weight, market=None, alpha=0.0, realism=0.0
 ) -> dict:
-    name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
-    name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
+    name_h = _side_label(m.home, teams)
+    name_a = _side_label(m.away, teams)
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "group": m.group, "played": m.match_id in results,
              "result": None, "tip": None, "naive": None, "market_tip": None, "data": None,
@@ -574,6 +592,28 @@ def _group_fixture_blocks(teams, fixtures, results, predictions, tipset,
             for m in ms]
 
 
+def _group_standings_sections(teams, standings) -> list[dict]:
+    """Per-group current standings tables from the played results (the shared calc step that also
+    feeds knockout determination). Groups with no match played yet are omitted so the section is
+    hidden pre-tournament. ``qualified`` flags the certain top-2 of a complete group — the placings
+    that fill the knockout bracket."""
+    sections = []
+    for g in standings:
+        if not any(r.played for r in g.rows):
+            continue
+        rows = [{
+            "rank": r.rank,
+            "team": teams[r.team_id].name if r.team_id in teams else r.team_id,
+            "played": r.played,
+            "wins": r.wins, "draws": r.draws, "losses": r.losses,
+            "points": r.points,
+            "gf": r.goals_for, "ga": r.goals_against, "gd": r.goal_diff,
+            "qualified": g.complete and r.placing_certain and r.rank <= 2,
+        } for r in g.rows]
+        sections.append({"letter": g.letter, "complete": g.complete, "rows": rows})
+    return sections
+
+
 def _advancement_sections(teams, fixtures, outcome) -> list[dict]:
     """Per-group advancement charts — the one place the report still groups by group, since the
     chart is inherently a per-group standings view. Empty when there is no simulation."""
@@ -617,10 +657,12 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
                                          market, alpha, realism))
         else:
-            note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
+            label_h = _side_label(m.home, teams)
+            label_a = _side_label(m.away, teams)
+            note = f"Participants not yet fully determined: {label_h} vs {label_a}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,
                            "kickoff": m.kickoff,
-                           "home": m.home.placeholder, "away": m.away.placeholder,
+                           "home": label_h, "away": label_a,
                            "played": False, "tip": None, "slot_note": note,
                            "occupants_chart": None})
     return blocks
