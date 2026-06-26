@@ -40,14 +40,15 @@ def test_finished_groups_fill_their_knockout_slots(wc2026):
     fixtures, results, _teams, thirds = wc2026
     resolved = _by_id(resolve_known_participants(fixtures, results, thirds))
 
-    # Groups A, B, C have finished -> M73 (R:A vs R:B) is fully known and now tippable.
+    # Groups A-F have finished -> M73 (R:A vs R:B) is fully known and now tippable.
     m73 = resolved["M73"]
     assert (m73.home.team_id, m73.away.team_id) == ("RSA", "CAN")
     assert m73.participants_known
 
-    # The finished-group side of a half-known fixture is filled; the open side stays a reference.
-    half = {"M75": ("away", "MAR"), "M76": ("home", "BRA"),
-            "M79": ("home", "MEX"), "M85": ("home", "SUI")}
+    # The finished-group side of a half-known fixture is filled; the open side (a runner-up or
+    # third-place slot from a still-unfinished group G-L) stays a reference.
+    half = {"M78": ("home", "CIV"), "M79": ("home", "MEX"),
+            "M81": ("home", "USA"), "M85": ("home", "SUI")}
     for mid, (side, team) in half.items():
         m = resolved[mid]
         known, other = (m.home, m.away) if side == "home" else (m.away, m.home)
@@ -73,10 +74,10 @@ def test_group_standings_finished_group(wc2026):
 def test_group_standings_in_progress_group(wc2026):
     fixtures, results, _teams, _thirds = wc2026
     standings = {g.letter: g for g in compute_group_standings(fixtures, results)}
-    d = standings["D"]  # only 4 of 6 matches played
+    d = standings["G"]  # only 4 of 6 matches played
     assert not d.complete
     assert sum(r.played for r in d.rows) == 2 * sum(
-        1 for m in fixtures if m.group == "D" and m.match_id in results)
+        1 for m in fixtures if m.group == "G" and m.match_id in results)
     assert all(not r.placing_certain for r in d.rows)  # provisional, nothing settled
     # Ranks are a 1..n permutation in points-descending order.
     assert [r.rank for r in d.rows] == [1, 2, 3, 4]
@@ -88,8 +89,9 @@ def test_undetermined_slots_are_left_untouched(wc2026):
     fixtures, results, _teams, thirds = wc2026
     resolved = _by_id(resolve_known_participants(fixtures, results, thirds))
     original = _by_id(fixtures)
-    # Groups D-L are unfinished and no third place / knockout has been decided.
-    for mid in ("M74", "M88", "M89", "M104"):
+    # Groups G-L are unfinished and no third place / knockout has been decided, so these slots
+    # (both sides drawn from still-open groups or later matches) are untouched.
+    for mid in ("M83", "M84", "M89", "M104"):
         assert resolved[mid].home == original[mid].home
         assert resolved[mid].away == original[mid].away
     # No 3RD slot can be filled until every group is complete.
