@@ -440,11 +440,18 @@ def _build_report_context(
     }
 
 
+def _side_label(side, teams) -> str:
+    """Display label for a fixture side: the team name when concrete, else the slot placeholder
+    (``Winner Group A`` / ``3rd place (slot 74)`` / ...). A concrete side's ``placeholder`` is
+    ``None``, so a partially-resolved knockout fixture must use this rather than ``placeholder``."""
+    return teams[side.team_id].name if side.is_concrete else side.placeholder
+
+
 def _fixture_block(
     m, teams, results, predictions, tipset, weight, market=None, alpha=0.0, realism=0.0
 ) -> dict:
-    name_h = teams[m.home.team_id].name if m.home.is_concrete else m.home.placeholder
-    name_a = teams[m.away.team_id].name if m.away.is_concrete else m.away.placeholder
+    name_h = _side_label(m.home, teams)
+    name_a = _side_label(m.away, teams)
     block = {"match_id": m.match_id, "home": name_h, "away": name_a, "kickoff": m.kickoff,
              "stage": m.stage.value, "group": m.group, "played": m.match_id in results,
              "result": None, "tip": None, "naive": None, "market_tip": None, "data": None,
@@ -650,10 +657,12 @@ def _knockout_sections(teams, fixtures, results, predictions, tipset, outcome,
             blocks.append(_fixture_block(m, teams, results, predictions, tipset, 2,
                                          market, alpha, realism))
         else:
-            note = f"Participants not yet determined: {m.home.placeholder} vs {m.away.placeholder}."
+            label_h = _side_label(m.home, teams)
+            label_a = _side_label(m.away, teams)
+            note = f"Participants not yet fully determined: {label_h} vs {label_a}."
             blocks.append({"match_id": m.match_id, "stage": m.stage.value,
                            "kickoff": m.kickoff,
-                           "home": m.home.placeholder, "away": m.away.placeholder,
+                           "home": label_h, "away": label_a,
                            "played": False, "tip": None, "slot_note": note,
                            "occupants_chart": None})
     return blocks

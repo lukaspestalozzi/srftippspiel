@@ -56,6 +56,13 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     top = standings["A"]["rows"][0]
     assert top["team"] == "Mexico" and top["points"] == 9 and top["qualified"]
     assert "✓ through" in html
+    # A partially-resolved knockout fixture shows the decided side's team name, not "None"
+    # (a concrete side's TeamRef.placeholder is None — must fall back to the team name).
+    ko = {b["match_id"]: b for b in result["context"]["knockout_fixtures"]}
+    assert ko["M76"]["home"] == "Brazil" and ko["M76"]["away"] == "Runner-up Group F"
+    assert ko["M75"]["away"] == "Morocco"
+    ko_html = html[html.find('id="knockout"'):html.find('id="title"')]
+    assert "None" not in ko_html
 
 
 def test_market_odds_tips_in_report(tmp_path, small_cfg):
