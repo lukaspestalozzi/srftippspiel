@@ -59,7 +59,7 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     # A partially-resolved knockout fixture shows the decided side's team name, not "None"
     # (a concrete side's TeamRef.placeholder is None — must fall back to the team name).
     ko = {b["match_id"]: b for b in result["context"]["knockout_fixtures"]}
-    assert ko["M88"]["home"] == "Australia" and ko["M88"]["away"] == "Runner-up Group G"
+    assert ko["M84"]["home"] == "Spain" and ko["M84"]["away"] == "Runner-up Group J"
     assert ko["M75"]["away"] == "Morocco"
     ko_html = html[html.find('id="knockout"'):html.find('id="title"')]
     assert "None" not in ko_html
