@@ -56,11 +56,13 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     top = standings["A"]["rows"][0]
     assert top["team"] == "Mexico" and top["points"] == 9 and top["qualified"]
     assert "✓ through" in html
-    # A partially-resolved knockout fixture shows the decided side's team name, not "None"
+    # A fully-resolved knockout fixture shows both teams' names, not "None"
     # (a concrete side's TeamRef.placeholder is None — must fall back to the team name).
     ko = {b["match_id"]: b for b in result["context"]["knockout_fixtures"]}
-    assert ko["M84"]["home"] == "Spain" and ko["M84"]["away"] == "Runner-up Group J"
+    assert ko["M84"]["home"] == "Spain" and ko["M84"]["away"] == "Austria"
     assert ko["M75"]["away"] == "Morocco"
+    # A later-round fixture filled from not-yet-played matches still shows the slot placeholder.
+    assert ko["M104"]["home"] == "Winner of M101" and ko["M104"]["away"] == "Winner of M102"
     ko_html = html[html.find('id="knockout"'):html.find('id="title"')]
     assert "None" not in ko_html
 

@@ -97,4 +97,4 @@ def test_load_played_match_ids_wc2026():
     assert "G_A_1" in played
     assert "G_A_2" in played
     # An unplayed (not-yet-kicked-off) fixture isn't recorded as played.
-    assert "G_L_6" not in played
+    assert "M104" not in played  # the final — far from being played

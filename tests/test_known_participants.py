@@ -40,21 +40,22 @@ def test_finished_groups_fill_their_knockout_slots(wc2026):
     fixtures, results, _teams, thirds = wc2026
     resolved = _by_id(resolve_known_participants(fixtures, results, thirds))
 
-    # Groups A-I have finished -> M73 (R:A vs R:B) is fully known and now tippable.
+    # The whole group stage has finished -> M73 (R:A vs R:B) is fully known and now tippable.
     m73 = resolved["M73"]
     assert (m73.home.team_id, m73.away.team_id) == ("RSA", "CAN")
     assert m73.participants_known
 
-    # The finished-group side of a half-known fixture is filled; the open side (a runner-up or
-    # third-place slot from a still-unfinished group J-L) stays a reference.
-    half = {"M79": ("home", "MEX"), "M81": ("home", "USA"),
-            "M84": ("home", "ESP"), "M85": ("home", "SUI")}
-    for mid, (side, team) in half.items():
-        m = resolved[mid]
-        known, other = (m.home, m.away) if side == "home" else (m.away, m.home)
-        assert known.team_id == team
-        assert not other.is_concrete  # opponent not decided yet
-        assert not m.participants_known
+    # A best-placed third fills its slot: M79 = W:A (Mexico) vs a third drawn from the allowed
+    # groups (Ecuador, third in Group E).
+    m79 = resolved["M79"]
+    assert (m79.home.team_id, m79.away.team_id) == ("MEX", "ECU")
+    assert m79.participants_known
+
+    # With every group complete, all 16 R32 fixtures (M73-M88) are concrete on both sides.
+    for n in range(73, 89):
+        m = resolved[f"M{n}"]
+        assert m.home.is_concrete and m.away.is_concrete
+        assert m.participants_known
 
 
 def test_group_standings_finished_group(wc2026):
@@ -71,13 +72,23 @@ def test_group_standings_finished_group(wc2026):
     assert all(r.placing_certain for r in a.rows)
 
 
-def test_group_standings_in_progress_group(wc2026):
-    fixtures, results, _teams, _thirds = wc2026
+def test_group_standings_in_progress_group():
+    # A group with only some matches played: standings are provisional and no placing is certain.
+    # Built from synthetic fixtures because every live wc2026 group has now finished.
+    fixtures = [
+        _group_match("Y1", "AAA", "BBB", group="Y"),
+        _group_match("Y2", "CCC", "DDD", group="Y"),
+        _group_match("Y3", "AAA", "CCC", group="Y"),
+        _group_match("Y4", "BBB", "DDD", group="Y"),
+        _group_match("Y5", "AAA", "DDD", group="Y"),
+        _group_match("Y6", "BBB", "CCC", group="Y"),
+    ]
+    scores = {"Y1": (1, 1), "Y2": (1, 1), "Y3": (0, 0)}  # only 3 of 6 played, all drawn
+    results = {mid: Result(mid, h, a) for mid, (h, a) in scores.items()}
     standings = {g.letter: g for g in compute_group_standings(fixtures, results)}
-    d = standings["J"]  # only 4 of 6 matches played
+    d = standings["Y"]
     assert not d.complete
-    assert sum(r.played for r in d.rows) == 2 * sum(
-        1 for m in fixtures if m.group == "J" and m.match_id in results)
+    assert sum(r.played for r in d.rows) == 2 * len(scores)
     assert all(not r.placing_certain for r in d.rows)  # provisional, nothing settled
     # Ranks are a 1..n permutation in points-descending order.
     assert [r.rank for r in d.rows] == [1, 2, 3, 4]
@@ -89,16 +100,16 @@ def test_undetermined_slots_are_left_untouched(wc2026):
     fixtures, results, _teams, thirds = wc2026
     resolved = _by_id(resolve_known_participants(fixtures, results, thirds))
     original = _by_id(fixtures)
-    # Groups J-L are unfinished and no third place / knockout has been decided, so these slots
-    # (both sides drawn from still-open groups or later matches) are untouched.
-    for mid in ("M83", "M90", "M89", "M104"):
+    # R16+ fixtures are filled from the winners of not-yet-played knockout matches, so both sides
+    # stay references until those matches are decided.
+    for mid in ("M89", "M90", "M97", "M104"):
         assert resolved[mid].home == original[mid].home
         assert resolved[mid].away == original[mid].away
-    # No 3RD slot can be filled until every group is complete.
+    # The group stage is complete, so every third-place slot has been allocated to a concrete team;
+    # no third_pooled reference remains anywhere in the bracket.
     for m in resolved.values():
         for side in (m.home, m.away):
-            if side.ko_ref and side.ko_ref.kind == "third_pooled":
-                assert not (m.home.is_concrete and m.away.is_concrete)
+            assert not (side.ko_ref and side.ko_ref.kind == "third_pooled")
 
 
 def _group_match(mid, home, away, group="X"):

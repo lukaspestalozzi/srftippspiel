@@ -9,9 +9,12 @@ import tippspiel
 from tippspiel.config import load_config, load_tournament
 from tippspiel.data.file_provider import FileDataProvider
 from tippspiel.pipeline import _predict_tippable, build_predictor, build_strategy
-from tippspiel.report.diagnostics import DiagnosticsWriter, build_diagnostics
+from tippspiel.report.diagnostics import (
+    DiagnosticsWriter,
+    _behaviour_notes,
+    build_diagnostics,
+)
 from tippspiel.simulation.simulator import TournamentSimulator
-from tippspiel.strategy.expected_points import ExpectedPointsStrategy
 
 REPO = Path(tippspiel.__file__).parent.parent
 
@@ -60,16 +63,22 @@ def test_tip_frequency_and_fixture_rows_account_for_every_tippable(diag):
 
 
 def test_low_scoreline_behaviour_is_explained():
-    # Under strict EV (realism_tolerance=0) tips cluster on 1:0/0:1; the diagnostic must answer the
-    # headline "why always 1:0 / 0:1?" via the tendency-dominance note. (The default config sets a
-    # realism tolerance that mitigates the clustering, so this exercises the strict-EV path.)
-    cfg, bundle, teams, fixtures, prov = _load()
-    predictor = build_predictor(cfg)
-    strict = ExpectedPointsStrategy(bundle.bonus_questions, realism_tolerance=0.0)
-    preds = _predict_tippable(fixtures, teams, predictor)
-    tipset = strict.generate_tips(preds, None, fixtures)
-    _md, data = build_diagnostics(cfg, bundle, teams, fixtures, {}, preds, tipset, None, predictor)
-    notes = " ".join(data["predictor_behaviour"]["notes"]).lower()
+    # When EV-optimal tips cluster on 1:0/0:1/1:1 (the strict-EV regime over the goal-poor group
+    # stage), the diagnostic must answer the headline "why always 1:0 / 0:1?" via the
+    # tendency-dominance note. Driven through _behaviour_notes directly so the assertion is stable
+    # regardless of how much the live tournament's tippable set currently clusters (e.g. once the
+    # group stage is over, only the stronger-favourite knockout fixtures remain tippable).
+    pb = {
+        "tip_frequency": [{"score": "1:0", "share": 0.45}, {"score": "0:1", "share": 0.25},
+                          {"score": "1:1", "share": 0.10}, {"score": "2:1", "share": 0.20}],
+        "mean_predicted_total_goals": 2.6,
+        "mean_rec_total_goals": 1.4,
+        "ev_component_mean": {"tendency": 2.1, "goal_diff": 0.6},
+        "tendency_split": {"draw": {"share": 0.10}},
+        "optimal_differs_share": 0.0,
+        "mean_ev_uplift": 0.0,
+    }
+    notes = " ".join(_behaviour_notes(pb)).lower()
     assert "1:0" in notes and "tendency" in notes
 
 
