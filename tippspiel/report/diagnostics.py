@@ -207,8 +207,52 @@ def _offdef_section(teams, predictor) -> dict:
     }
 
 
+# ------------------------------------------------------------------- market-source agreement
+def _source_agreement(odds_file) -> dict:
+    """ESPN vs Polymarket de-vigged 1X2 agreement, read from the committed source sidecars.
+
+    The consumed ``odds.csv`` is a blend of per-source snapshots (``odds_espn.csv`` /
+    ``odds_polymarket.csv``); this loads whichever sidecars sit beside it and, for every fixture
+    both price, reports the per-outcome gap between the two markets. Polymarket has no historical
+    data so the blend can't go through ``verify``/``tune`` — this agreement check is how the two
+    sources are sanity-compared instead. ``{"available": False}`` when fewer than two sources exist.
+    """
+    if not odds_file:
+        return {"available": False}
+    from ..data.file_provider import read_odds_file
+
+    data_dir = Path(odds_file).parent
+    espn = read_odds_file(data_dir / "odds_espn.csv")
+    poly = read_odds_file(data_dir / "odds_polymarket.csv")
+    common = sorted(set(espn) & set(poly))
+    if not common:
+        return {"available": False, "n_espn": len(espn), "n_poly": len(poly)}
+    rows = []
+    for mid in common:
+        e, p = espn[mid], poly[mid]
+        delta = {"home": e.p_home - p.p_home, "draw": e.p_draw - p.p_draw,
+                 "away": e.p_away - p.p_away}
+        rows.append({
+            "match_id": mid,
+            "espn": {"home": e.p_home, "draw": e.p_draw, "away": e.p_away},
+            "poly": {"home": p.p_home, "draw": p.p_draw, "away": p.p_away},
+            "max_abs_delta": max(abs(v) for v in delta.values()),
+        })
+    n = len(rows)
+    mean_gap = sum(r["max_abs_delta"] for r in rows) / n
+    rows.sort(key=lambda r: r["max_abs_delta"], reverse=True)
+    return {
+        "available": True,
+        "n_compared": n,
+        "n_espn": len(espn),
+        "n_poly": len(poly),
+        "mean_max_abs_delta": mean_gap,
+        "top_divergences": rows[:8],
+    }
+
+
 # --------------------------------------------------------------------------- model vs market
-def _market_section(fixtures, teams, predictions, predictor, odds) -> dict:
+def _market_section(fixtures, teams, predictions, predictor, odds, odds_file=None) -> dict:
     """Model vs de-vigged market 1X2 — the Bächinger-style "value" (WERT) check.
 
     The model side is always the *pure* model (the blend's Elo fallback when the active
@@ -218,8 +262,9 @@ def _market_section(fixtures, teams, predictions, predictor, odds) -> dict:
     sees ``> _VALUE_FLAG`` more probability than the market ("value" under the model). The
     mean absolute gap doubles as a drift alarm on the model's calibration vs the market.
     """
+    sources = _source_agreement(odds_file)
     if not odds:
-        return {"available": False}
+        return {"available": False, "sources": sources}
     model = getattr(predictor, "fallback", predictor)
     by_id = {m.match_id: m for m in fixtures}
     rows = []
@@ -242,7 +287,7 @@ def _market_section(fixtures, teams, predictions, predictor, odds) -> dict:
             "value_outcomes": sorted(k for k, v in delta.items() if v > _VALUE_FLAG),
         })
     if not rows:
-        return {"available": False}
+        return {"available": False, "sources": sources}
     n = len(rows)
     mean_abs = {k: sum(abs(r["delta"][k]) for r in rows) / n for k in ("home", "draw", "away")}
     overall = sum(mean_abs.values()) / 3.0
@@ -256,6 +301,7 @@ def _market_section(fixtures, teams, predictions, predictor, odds) -> dict:
         "n_value_flags": sum(1 for r in rows if r["value_outcomes"]),
         "top_divergences": rows[:5],
         "fixtures": sorted(rows, key=lambda r: r["match_id"]),
+        "sources": sources,
     }
 
 
@@ -393,6 +439,15 @@ def _anomaly_checks(predictions, records, pb, sim, bonus, market=None) -> list[d
                        "status": "WARN" if gap > _MARKET_DIVERGENCE_WARN else "PASS",
                        "detail": f"mean |model - market| {gap:.3f} over "
                                  f"{market['n_compared']} odds-backed fixtures "
+                                 f"(warn > {_MARKET_DIVERGENCE_WARN})"})
+
+    src = (market or {}).get("sources") or {}
+    if src.get("available"):
+        sgap = src["mean_max_abs_delta"]
+        checks.append({"name": "ESPN vs Polymarket 1X2 gap",
+                       "status": "WARN" if sgap > _MARKET_DIVERGENCE_WARN else "PASS",
+                       "detail": f"mean max |ESPN - Polymarket| {sgap:.3f} over "
+                                 f"{src['n_compared']} fixtures both price "
                                  f"(warn > {_MARKET_DIVERGENCE_WARN})"})
 
     for b in bonus:
@@ -533,6 +588,26 @@ def _render_markdown(meta, pb, notes, offdef, market, records, sim, bonus, anoma
                          ",".join(r["value_outcomes"]) or "-"])
         L.append(_fixed_table(["match", "tie", "model LDW", "market LDW", "max |d|", "value"],
                               rows))
+
+    # 4b. Market source agreement (ESPN vs Polymarket), when both sidecars are committed.
+    src = market.get("sources") or {}
+    if src.get("available"):
+        L.append("")
+        L.append("### Market source agreement (ESPN vs Polymarket)")
+        L.append(f"De-vigged 1X2 over {src['n_compared']} fixtures both sources price "
+                 f"(ESPN {src['n_espn']}, Polymarket {src['n_poly']}). The consumed `odds.csv` is "
+                 f"the blend of these; Polymarket has no historical data so this agreement check "
+                 f"stands in for the `verify`/`tune` calibration the blend can't get. "
+                 f"Mean max |ESPN - Polymarket| = {src['mean_max_abs_delta']:.3f} "
+                 f"(warn > {_MARKET_DIVERGENCE_WARN}).")
+        L.append("")
+
+        def _ldw3(d):
+            return "/".join(f"{d[k]:.0%}".rstrip("%") for k in ("home", "draw", "away"))
+
+        srows = [[r["match_id"], _ldw3(r["espn"]), _ldw3(r["poly"]), f"{r['max_abs_delta']:.2f}"]
+                 for r in src["top_divergences"]]
+        L.append(_fixed_table(["match", "ESPN LDW", "Polymarket LDW", "max |d|"], srows))
     L.append("")
 
     # 5. Per-fixture detail
@@ -618,7 +693,8 @@ def build_diagnostics(cfg, bundle, teams, fixtures, results, predictions, tipset
     pb = _predictor_behaviour(records)
     notes = _behaviour_notes(pb)
     offdef = _offdef_section(teams, predictor)
-    market = _market_section(fixtures, teams, predictions, predictor, odds or {})
+    market = _market_section(fixtures, teams, predictions, predictor, odds or {},
+                             odds_file=getattr(bundle, "odds_file", None))
     sim = _simulation_section(outcome, teams, fixtures)
     bonus = _bonus_section(bundle, teams, outcome)
     anomalies = _anomaly_checks(predictions, records, pb, sim, bonus, market)

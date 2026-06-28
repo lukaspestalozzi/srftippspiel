@@ -28,8 +28,11 @@ Run from the repo root. For wc2026 the ESPN slug is `fifa.world`.
 python -m tippspiel.data.espn_results_fetch wc2026 fifa.world                      # dry-run (prints plan)
 python -m tippspiel.data.espn_results_fetch wc2026 fifa.world --write --config config.yaml
 
-# 2. ODDS
-python -m tippspiel.data.espn_odds_fetch wc2026 fifa.world
+# 2. ODDS — fetch both sources into sidecars, then blend into the consumed odds.csv
+python -m tippspiel.data.espn_odds_fetch wc2026 fifa.world --out tippspiel/data/tournaments/wc2026/odds_espn.csv
+python -m tippspiel.data.polymarket_odds_fetch wc2026                                  # -> odds_polymarket.csv
+python -m tippspiel.data.odds_consensus tippspiel/data/tournaments/wc2026/odds.csv \
+    tippspiel/data/tournaments/wc2026/odds_espn.csv tippspiel/data/tournaments/wc2026/odds_polymarket.csv
 
 # 3. ELO (elo + att/def, from the grown corpus)
 tippspiel fit-ratings --config config.yaml
@@ -68,8 +71,9 @@ This skill is run repeatedly against the same branch, in a fresh container each 
   tests with **`python -m pytest -q`** — a bare `pytest` on PATH may be an isolated uv-tool install
   without the project's deps and fails collection with `ModuleNotFoundError: No module named 'yaml'`.
 - **Network egress may block the feeds.** Some environments allowlist outbound hosts; a blocked
-  fetch returns `403 Host not in allowlist`. The hosts this skill needs are `site.api.espn.com` and
-  `sports.core.api.espn.com`. If a feed is blocked it degrades cleanly — `espn_results_fetch` reports
+  fetch returns `403 Host not in allowlist`. The hosts this skill needs are `site.api.espn.com`,
+  `sports.core.api.espn.com` and `gamma-api.polymarket.com` (Polymarket odds). If a feed is blocked
+  it degrades cleanly — `espn_results_fetch` reports
   the fixtures as "no finished-match scoreboard entry found" and records nothing; the odds fetch
   writes nothing new. **Skip that sub-step, leave the committed snapshot untouched, note it in the
   commit, and let the next run pick it up.** Never fabricate a value to work around a blocked feed.
@@ -125,17 +129,40 @@ How it works (under the hood):
 - **Future knockout rows aren't in the corpus yet** (participants TBD), so a KO match takes the
   `[appended]` path with `neutral` inferred from the venue; group matches are always `[filled]`.
 
-## Odds — `espn_odds_fetch`
+## Odds — two sources, blended into one `odds.csv`
 
 `odds.csv` (`match_id,odds_home,odds_draw,odds_away`, raw decimal, de-vigged at load) feeds the
-`MarketOddsPredictor` and the report's per-fixture market-odds tip. The tool regenerates it from
-**ESPN's public JSON feed** — real sportsbook moneylines as *structured data*, so no HTML scraping
-and no language-model extraction (and therefore no fabricated numbers). Code:
-`tippspiel/data/espn_odds_fetch.py`.
+`MarketOddsPredictor` and the report's per-fixture market-odds tip. For the live wc2026 it is the
+**consensus** of two market sources, each fetched into its own committed sidecar then blended:
+
+- **ESPN** (`espn_odds_fetch.py`) — real sportsbook moneylines from ESPN's public JSON feed →
+  `odds_espn.csv`.
+- **Polymarket** (`polymarket_odds_fetch.py`) — match-winner prices from the Polymarket Gamma API
+  (high-liquidity prediction market, sharp/late signal) → `odds_polymarket.csv`.
+- **Consensus** (`odds_consensus.py`) — de-vigs each source to probabilities, averages them per
+  match (a fixture present in only one source passes through), writes the blended `odds.csv`.
+
+Both fetchers are structured-JSON only (no HTML scraping / language-model extraction, so no
+fabricated numbers) and both now price **knockout** fixtures too: they build their fixture list from
+`fixture_resolve.load_tippable_fixtures`, which resolves KO participants from the played results once
+the bracket is settled (group matches + certain KO matchups; still-open slots are skipped).
 
 ```bash
-python -m tippspiel.data.espn_odds_fetch wc2026 fifa.world      # writes tournaments/wc2026/odds.csv
+D=tippspiel/data/tournaments/wc2026
+python -m tippspiel.data.espn_odds_fetch wc2026 fifa.world --out $D/odds_espn.csv
+python -m tippspiel.data.polymarket_odds_fetch wc2026                       # --league fifwc (default)
+python -m tippspiel.data.odds_consensus $D/odds.csv $D/odds_espn.csv $D/odds_polymarket.csv
 ```
+
+Commit all three (`odds.csv` + both sidecars): the sidecars are the provenance and feed the
+diagnostic's **"Market source agreement"** subsection (ESPN vs Polymarket per-fixture gap). If one
+feed is blocked/empty, run the consensus over whichever sidecar(s) you have and note it — never
+fabricate a value.
+
+### ESPN source
+
+The ESPN fetch reads the *moneyline* trio (home/draw/away) from real sportsbooks. Code:
+`tippspiel/data/espn_odds_fetch.py`.
 
 ### League slugs (the second arg)
 
@@ -179,10 +206,47 @@ ESPN names → repo `team_id` via `teams.csv` names plus an `_ALIASES` dict in t
 `IR Iran→Iran`, `Korea Republic→South Korea`, `Czech Republic→Czechia`). If a fixture is "without
 odds" but clearly exists, the usual cause is an unmapped name — add the ESPN spelling to `_ALIASES`.
 
+### Polymarket source
+
+Code: `tippspiel/data/polymarket_odds_fetch.py`. The Polymarket Gamma API
+(`gamma-api.polymarket.com`, public, no key) models each match as one *event*
+(slug `fifwc-<home>-<away>-<date>`) holding three binary `moneyline` markets — home-win, draw,
+away-win — each market's *Yes* `outcomePrices[0]` being that outcome's implied probability.
+
+- **Discovery is by exact slug, not search/listing.** Gamma's events/markets *listings* embed full
+  market bodies and run to tens of MB (unreliable to stream); single-event fetches
+  (`/events/slug/<slug>`) are tiny and reliable. The per-team slug code is read from
+  `/teams?league=fifwc` (Polymarket's own abbreviation, e.g. `nld`/`prt`/`cvi` — **not** the repo's
+  FIFA id), mapped to the repo team by normalised name. Order/date ambiguity is covered by trying
+  both team orders × the match date ±1.
+- **Orient by team identity** (each market's `groupItemTitle`), normalise the trio to sum 1, write
+  `1/p` as decimal odds. A 404 (match not posted yet) is skipped, not retried.
+- **Team-name mapping** reuses the shared `ALIASES`/`norm` in `espn_common.py`. A team that comes up
+  "without odds" but clearly exists is usually a missing name alias **or** the match isn't posted yet.
+
 ### Spot-check the odds before committing
 
 - Favorite sanity: e.g. WC2026 `G_A_1` (Mexico v South Africa) ≈ `1.49,4.30,7.00` (heavy home
   favorite). A flipped or flat trio means an orientation or mapping bug.
+- Cross-source sanity: ESPN and Polymarket should broadly agree — the diagnostic's "Market source
+  agreement" subsection (`tippspiel diagnose`) reports the per-fixture gap; a large mean gap flags a
+  mapping/orientation bug in one source.
+
+### Probing Polymarket by hand
+
+```bash
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+curl -sS -A "$UA" "https://gamma-api.polymarket.com/teams?league=fifwc&limit=500" \
+  | python -c "import sys,json;[print(t['abbreviation'],t['name']) for t in json.load(sys.stdin)]"
+curl -sS -A "$UA" "https://gamma-api.polymarket.com/events/slug/fifwc-fra-swe-2026-06-30" \
+  | python -c "import sys,json;e=json.load(sys.stdin);print([(m['groupItemTitle'],m['outcomePrices']) for m in e['markets']])"
+```
+
+**Caveat — live wc2026 only.** Polymarket has no historical data, so unlike ESPN it cannot be added
+to the `verify`/`tune` benchmarks (completed-benchmark configs stay pure-Elo). It's a live-only
+enhancement, validated via the diagnostic's source-agreement check rather than a backtest. The egress
+host it needs is `gamma-api.polymarket.com` (a blocked feed degrades cleanly — skip it, blend the
+sources you have).
 
 ## Elo — `fit-ratings`
 

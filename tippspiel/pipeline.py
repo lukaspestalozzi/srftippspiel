@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 
 from .config import Config, TournamentBundle
 from .data.base import Odds1X2
-from .data.file_provider import FileDataProvider
+from .data.file_provider import FileDataProvider, read_odds_file
 from .model.types import Match, MatchPrediction, Team, TournamentOutcome
 from .predictors.base import Predictor
 from .predictors.elo_poisson import EloPoissonPredictor
@@ -384,10 +384,17 @@ def _build_report_context(
     # The per-fixture market tip: predictions carry the scoreline (for the EV-optimal tip), and
     # ``odds_ids`` gates display to fixtures backed by genuine bookmaker odds (never a silent
     # Elo-fallback duplicate).
+    # Per-source de-vigged odds (ESPN, Polymarket) read from the committed sidecars next to the
+    # consumed odds.csv, so the folded per-fixture section can show both sources beside the blend.
+    src_dir = bundle.odds_file.parent if bundle.odds_file else None
     market = {
         "preds": market_predictions,
         "odds_ids": set(odds or {}),
         "odds": odds or {},
+        "sources": {
+            "espn": read_odds_file(src_dir / "odds_espn.csv") if src_dir else {},
+            "poly": read_odds_file(src_dir / "odds_polymarket.csv") if src_dir else {},
+        },
     }
     # Off/def goal-volume weight of the active predictor; gates the per-fixture att/def display.
     alpha = float(getattr(predictor, "alpha", 0.0))
@@ -537,6 +544,7 @@ def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
         "rec_components": None,
         "rec_cell_prob": None,
         "market_probs": None,
+        "market_sources": {},
     }
     # Elo + off/def only when both sides are concrete teams (knockout slots may be placeholders).
     if m.home.is_concrete and m.away.is_concrete:
@@ -562,6 +570,14 @@ def _fixture_data(m, teams, dist, rec, weight, market, alpha=0.0) -> dict:
     if m.match_id in odds:
         o = odds[m.match_id]
         data["market_probs"] = {"home": o.p_home, "draw": o.p_draw, "away": o.p_away}
+    # Per-source de-vigged 1X2 (ESPN / Polymarket) for the same fixture, where that source priced it,
+    # so the folded section shows both markets beside the blend.
+    src = (market or {}).get("sources", {})
+    data["market_sources"] = {
+        name: {"home": o.p_home, "draw": o.p_draw, "away": o.p_away}
+        for name, table in (("espn", src.get("espn", {})), ("poly", src.get("poly", {})))
+        if (o := table.get(m.match_id)) is not None
+    }
     return data
 
 

@@ -18,7 +18,8 @@ import tippspiel
 REPO = Path(tippspiel.__file__).parent.parent
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-# ESPN display names that differ from the repo's ``teams.csv`` names. Extend as needed.
+# External-source (ESPN, Polymarket, …) display names that differ from the repo's ``teams.csv``
+# names. Shared by every fetcher's ``norm`` so a team maps consistently regardless of source.
 ALIASES = {
     "ir iran": "iran",
     "korea republic": "south korea",
@@ -43,7 +44,9 @@ def get_json(url: str, *, retries: int = 4) -> dict:
     for i in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=25) as fh:
-                return json.load(fh)
+                # Read the whole body before parsing: streaming ``json.load`` trips on chunked
+                # responses through some egress proxies (IncompleteRead on large bodies).
+                return json.loads(fh.read())
         except Exception:  # noqa: BLE001 — maintainer tool, best-effort with backoff
             if i == retries - 1:
                 raise
