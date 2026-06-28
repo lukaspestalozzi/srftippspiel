@@ -16,7 +16,6 @@ This report is intended to evolve freely; add/extend sections whenever a new que
 
 from __future__ import annotations
 
-import csv
 import json
 import subprocess
 from collections import Counter
@@ -220,29 +219,11 @@ def _source_agreement(odds_file) -> dict:
     """
     if not odds_file:
         return {"available": False}
-    from ..data.file_provider import _devig_proportional
+    from ..data.file_provider import read_odds_file
 
     data_dir = Path(odds_file).parent
-
-    def _load(name):
-        path = data_dir / name
-        if not path.exists():
-            return {}
-        out = {}
-        with path.open(newline="", encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                mid = (row.get("match_id") or "").strip()
-                if not mid:
-                    continue
-                try:
-                    out[mid] = _devig_proportional(
-                        float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
-                    )
-                except (ValueError, ZeroDivisionError, KeyError):
-                    continue
-        return out
-
-    espn, poly = _load("odds_espn.csv"), _load("odds_polymarket.csv")
+    espn = read_odds_file(data_dir / "odds_espn.csv")
+    poly = read_odds_file(data_dir / "odds_polymarket.csv")
     common = sorted(set(espn) & set(poly))
     if not common:
         return {"available": False, "n_espn": len(espn), "n_poly": len(poly)}

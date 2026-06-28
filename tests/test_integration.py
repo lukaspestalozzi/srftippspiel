@@ -88,10 +88,48 @@ def test_market_odds_tips_in_report(tmp_path, small_cfg):
     html = Path(path).read_text()
     # One odds line, gated to the two odds-backed fixtures only.
     assert html.count("Market-odds tip:") == 2
-    # The de-vigged 1X2 row appears in the data table for exactly those two fixtures.
-    assert html.count("Market (de-vigged)") == 2
+    # The blended de-vigged 1X2 row appears in the data table for exactly those two fixtures.
+    assert html.count("Market — blended (de-vigged)") == 2
+    # With no per-source sidecars present, only the blend renders (no ESPN/Polymarket rows).
+    assert "Market — ESPN" not in html and "Market — Polymarket" not in html
     # The Elo recommended tip is unaffected: all 72 group fixtures still tipped.
     assert sum(1 for mid in result["tipset"].tips if mid.startswith("G_")) == 72
+
+
+def test_market_source_rows_in_report(tmp_path, small_cfg):
+    # When odds_espn.csv / odds_polymarket.csv sidecars sit beside odds.csv, the folded per-fixture
+    # section shows each source's de-vigged 1X2 — gated per source to the fixtures it priced.
+    (tmp_path / "odds.csv").write_text(
+        "match_id,odds_home,odds_draw,odds_away\n"
+        "G_A_1,1.5,4.0,6.0\nG_A_2,2.1,3.3,3.4\nG_A_3,1.8,3.5,4.5\n"
+    )
+    (tmp_path / "odds_espn.csv").write_text(
+        "match_id,odds_home,odds_draw,odds_away\n"
+        "G_A_1,1.5,4.0,6.0\nG_A_3,1.8,3.5,4.5\n"          # ESPN prices A_1 + A_3
+    )
+    (tmp_path / "odds_polymarket.csv").write_text(
+        "match_id,odds_home,odds_draw,odds_away\n"
+        "G_A_1,1.55,3.9,5.8\nG_A_2,2.05,3.35,3.45\n"      # Polymarket prices A_1 + A_2
+    )
+    cfg = dataclasses.replace(
+        small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path)),
+    )
+    bundle = dataclasses.replace(BUNDLE, odds_file=tmp_path / "odds.csv")
+    result = run_pipeline(cfg, bundle, simulate=False)
+    html = Path(write_report(cfg, result["context"])).read_text()
+
+    assert html.count("Market — ESPN") == 2          # A_1, A_3
+    assert html.count("Market — Polymarket") == 2     # A_1, A_2
+    assert html.count("Market — blended (de-vigged)") == 3  # all three odds-backed fixtures
+
+    # The data block carries per-source triples, gated to where each source priced the fixture.
+    blocks = {f["match_id"]: f["data"]["market_sources"]
+              for f in result["context"]["group_fixtures"] if f["data"]}
+    assert set(blocks["G_A_1"]) == {"espn", "poly"}
+    assert set(blocks["G_A_2"]) == {"poly"}
+    assert set(blocks["G_A_3"]) == {"espn"}
+    espn = blocks["G_A_1"]["espn"]
+    assert abs(espn["home"] + espn["draw"] + espn["away"] - 1.0) < 1e-9
 
 
 def _with_alpha(cfg, alpha):

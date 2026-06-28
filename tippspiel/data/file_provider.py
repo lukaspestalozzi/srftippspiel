@@ -50,6 +50,31 @@ def _devig_proportional(odds_home: float, odds_draw: float, odds_away: float) ->
     return Odds1X2(imp_h / booksum, imp_d / booksum, imp_a / booksum)
 
 
+def read_odds_file(path: str | Path | None) -> dict[str, Odds1X2]:
+    """De-vigged 1X2 per match_id from an ``odds.csv``-schema file ({} if absent/None).
+
+    The single reader for any odds snapshot — the consumed ``odds.csv`` (via ``get_odds``) and the
+    committed source sidecars (``odds_espn.csv`` / ``odds_polymarket.csv``) read by the report and
+    the diagnostic. Raw decimal odds in, proportionally de-vigged probabilities out.
+    """
+    path = Path(path) if path else None
+    if not path or not path.exists():
+        return {}
+    odds: dict[str, Odds1X2] = {}
+    with path.open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            mid = (row.get("match_id") or "").strip()
+            if not mid:
+                continue
+            try:
+                odds[mid] = _devig_proportional(
+                    float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
+                )
+            except (ValueError, ZeroDivisionError, KeyError):
+                continue
+    return odds
+
+
 class FileDataProvider(DataProvider):
     def __init__(
         self,
@@ -178,15 +203,4 @@ class FileDataProvider(DataProvider):
         auditable, de-vigged at load). Rows are optional per match; a match absent here falls
         back to the Elo predictor in ``MarketOddsPredictor``.
         """
-        if not self.odds_file or not self.odds_file.exists():
-            return {}
-        odds: dict[str, Odds1X2] = {}
-        with self.odds_file.open(newline="", encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                mid = (row.get("match_id") or "").strip()
-                if not mid:
-                    continue
-                odds[mid] = _devig_proportional(
-                    float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
-                )
-        return odds
+        return read_odds_file(self.odds_file)

@@ -7,7 +7,9 @@
     {% if d.offdef %}<tr><th>Attack / defence</th><td>{{ d.offdef.home_name }} att <b>{{ "%+.2f"|format(d.offdef.att_home) }}</b> / def <b>{{ "%+.2f"|format(d.offdef.def_home) }}</b> · {{ d.offdef.away_name }} att <b>{{ "%+.2f"|format(d.offdef.att_away) }}</b> / def <b>{{ "%+.2f"|format(d.offdef.def_away) }}</b> <span class="sub">(off/def goal-volume {{ d.offdef.pct }})</span></td></tr>{% endif %}
     <tr><th>Top scorelines</th><td>{% for h, a, p in d.top3 %}{{ h }}–{{ a }} ({{ "%.1f"|format(p*100) }}%){% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
     {% if d.rec_components %}<tr><th>Why this tip</th><td>tendency {{ "%.2f"|format(d.rec_components.tendency) }} + home {{ "%.2f"|format(d.rec_components.home_goals) }} + away {{ "%.2f"|format(d.rec_components.away_goals) }} + diff {{ "%.2f"|format(d.rec_components.goal_diff) }} = <b>{{ "%.2f"|format(d.rec_components.total) }}</b> <span class="sub">· P(exact tip) {{ "%.1f"|format(d.rec_cell_prob*100) }}%</span></td></tr>{% endif %}
-    {% if d.market_probs %}<tr><th>Market (de-vigged)</th><td>{{ "%.1f"|format(d.market_probs.home*100) }}% / {{ "%.1f"|format(d.market_probs.draw*100) }}% / {{ "%.1f"|format(d.market_probs.away*100) }}%</td></tr>{% endif %}
+    {% if d.market_sources and d.market_sources.espn %}<tr><th>Market — ESPN</th><td>{{ "%.1f"|format(d.market_sources.espn.home*100) }}% / {{ "%.1f"|format(d.market_sources.espn.draw*100) }}% / {{ "%.1f"|format(d.market_sources.espn.away*100) }}%</td></tr>{% endif %}
+    {% if d.market_sources and d.market_sources.poly %}<tr><th>Market — Polymarket</th><td>{{ "%.1f"|format(d.market_sources.poly.home*100) }}% / {{ "%.1f"|format(d.market_sources.poly.draw*100) }}% / {{ "%.1f"|format(d.market_sources.poly.away*100) }}%</td></tr>{% endif %}
+    {% if d.market_probs %}<tr><th>Market — blended (de-vigged)</th><td>{{ "%.1f"|format(d.market_probs.home*100) }}% / {{ "%.1f"|format(d.market_probs.draw*100) }}% / {{ "%.1f"|format(d.market_probs.away*100) }}%</td></tr>{% endif %}
   </table>
 </div>
 {% endmacro %}
