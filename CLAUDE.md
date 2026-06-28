@@ -38,7 +38,15 @@ A tournament's data lives under `tippspiel/data/tournaments/<name>/`: `teams.csv
 `fixtures.csv`, `results.csv` (+ optional `thirds_allocation.json` and `odds.csv` sidecars).
 `odds.csv` (`match_id,odds_home,odds_draw,odds_away`, raw decimal odds, de-vigged at load)
 feeds the `MarketOddsPredictor` and the report's per-fixture "Market-odds tip"; wire it up with
-`tournament.odds_file: odds.csv` + `predictor.name: market_odds`. The
+`tournament.odds_file: odds.csv` + `predictor.name: market_odds`. For the **live wc2026**, `odds.csv`
+is the **consensus** of two sources — ESPN sportsbook (`odds_espn.csv`) + Polymarket
+(`odds_polymarket.csv`) — each fetched into its own committed sidecar and blended in probability
+space by `data/odds_consensus.py` (a fixture present in only one source passes through). Both
+fetchers (`espn_odds_fetch.py`, `polymarket_odds_fetch.py`) build their fixture list from
+`data/fixture_resolve.py`, which resolves **knockout** participants from the played results once the
+bracket is settled — so KO matches get priced, not just group games. Polymarket has no historical
+data, so it's live-only (the completed benchmarks stay ESPN/pure-Elo) and is validated via the
+diagnostic's "Market source agreement" (ESPN-vs-Polymarket) check rather than `verify`/`tune`. The
 **format is derived from the data**, not configured: group count/size from `fixtures.csv`,
 and the knockout chain + whether thirds qualify **from the knockout fixtures themselves** —
 KO rows reference group placings or earlier matches via structured refs in `home_ref`/`away_ref`:
@@ -240,9 +248,11 @@ the report's per-fixture "Market-odds tip"), with three blend knobs — `market_
 pool), `match_draw` (draw-matching expansion) and `divergence_threshold` (gate the blend to fixtures
 where model and market disagree) — plus the diagnostic model-vs-market value check. `tippspiel tune
 --market` sweeps the blend axes with the Elo params pinned. ESPN-sourced `odds.csv` snapshots are
-committed for wc2026 and 4 of the 5 `verify` benchmarks (womenseuro2025, wc2022, euro2024,
-euro2020); **wc2018 has none** (ESPN's archive doesn't go that far back — sourcing it via
-`odds_adapter.convert_odds_export` is an open optional task).
+committed for the 4 odds-backed `verify` benchmarks (womenseuro2025, wc2022, euro2024, euro2020);
+**wc2018 has none** (ESPN's archive doesn't go that far back — sourcing it via
+`odds_adapter.convert_odds_export` is an open optional task). The **live wc2026** `odds.csv` is the
+ESPN+Polymarket consensus (see "Tournaments layer": `odds_espn.csv` + `odds_polymarket.csv` →
+`odds_consensus.py`); Polymarket is live-only (no archive to backtest).
 
 **Decision (2026-06):** on the backtests the blend is at best neutral — it slightly improves
 calibration but costs pool points, and the targeted `divergence_threshold` variant recovers the

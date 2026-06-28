@@ -31,8 +31,8 @@ Usage (run from the repo root, network required)::
 
 from __future__ import annotations
 
+import argparse
 import csv
-import sys
 from pathlib import Path
 
 from tippspiel.data.espn_common import (
@@ -40,10 +40,9 @@ from tippspiel.data.espn_common import (
     fetch_scoreboard,
     find_event,
     get_json,
-    load_concrete_fixtures,
-    load_played_match_ids,
     load_teams,
 )
+from tippspiel.data.fixture_resolve import load_tippable_fixtures
 
 
 def _american_to_decimal(american: float) -> float:
@@ -96,8 +95,8 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
     """Fetch ESPN odds for ``tournament``'s fixtures and write ``odds.csv``. Returns rows written."""
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
-    played = load_played_match_ids(tdir)
-    fixtures = [f for f in load_concrete_fixtures(tdir) if f["match_id"] not in played]
+    # Group matches plus any knockout fixtures the played results have already settled.
+    fixtures = load_tippable_fixtures(tdir)
 
     dates = sorted({f["date"] for f in fixtures})
     scoreboard = fetch_scoreboard(slug, dates)
@@ -145,6 +144,9 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        sys.exit("usage: python -m tippspiel.data.espn_odds_fetch <tournament> <espn_league_slug>")
-    fetch_odds(sys.argv[1], sys.argv[2])
+    ap = argparse.ArgumentParser(description="Fetch ESPN 1X2 odds -> odds.csv schema")
+    ap.add_argument("tournament", help="repo tournament name, e.g. wc2026")
+    ap.add_argument("slug", help="ESPN soccer league slug, e.g. fifa.world")
+    ap.add_argument("--out", default=None, help="output path (default: <data_dir>/odds.csv)")
+    args = ap.parse_args()
+    fetch_odds(args.tournament, args.slug, args.out)

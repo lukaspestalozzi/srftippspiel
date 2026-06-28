@@ -97,8 +97,10 @@ def test_json_sidecar_round_trips(diag, tmp_path):
 
 
 def test_market_section_absent_without_odds(diag):
-    # The module fixture passes no odds -> section unavailable, gracefully noted.
-    assert diag["data"]["market"] == {"available": False}
+    # The module fixture passes no odds -> model-vs-market check unavailable, gracefully noted.
+    # (The independent ESPN-vs-Polymarket source agreement reads the committed sidecars and is
+    # reported separately under market["sources"].)
+    assert diag["data"]["market"]["available"] is False
     assert "model-vs-market comparison unavailable" in diag["md"]
 
 
