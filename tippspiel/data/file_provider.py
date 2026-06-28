@@ -70,8 +70,10 @@ def read_odds_file(path: str | Path | None) -> dict[str, Odds1X2]:
                 odds[mid] = _devig_proportional(
                     float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
                 )
-            except (ValueError, ZeroDivisionError, KeyError):
-                continue
+            except (ValueError, ZeroDivisionError, KeyError) as e:
+                # Fail fast (like get_results) so a malformed committed odds.csv/sidecar surfaces
+                # loudly rather than silently dropping the fixture to an Elo fallback.
+                raise ValueError(f"{path}: bad odds row for {mid!r}: {e}") from e
     return odds
 
 

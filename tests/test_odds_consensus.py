@@ -2,7 +2,9 @@
 
 import csv
 
-from tippspiel.data.file_provider import _devig_proportional
+import pytest
+
+from tippspiel.data.file_provider import _devig_proportional, read_odds_file
 from tippspiel.data.odds_consensus import build_consensus
 
 
@@ -65,3 +67,24 @@ def test_weights_bias_the_blend(tmp_path):
     build_consensus([a, b], out, weights=[3.0, 1.0])
     ph, _, _ = _probs(out)["X"]
     assert ph > 0.44
+
+
+def test_negative_and_zero_weights_rejected(tmp_path):
+    a, b, out = tmp_path / "a.csv", tmp_path / "b.csv", tmp_path / "out.csv"
+    _write(a, [{"match_id": "X", "odds_home": "2.0", "odds_draw": "4.0", "odds_away": "4.0"}])
+    _write(b, [{"match_id": "X", "odds_home": "2.0", "odds_draw": "4.0", "odds_away": "4.0"}])
+    with pytest.raises(ValueError, match="non-negative"):
+        build_consensus([a, b], out, weights=[-1.0, 2.0])
+    with pytest.raises(ValueError, match="positive"):
+        build_consensus([a, b], out, weights=[0.0, 0.0])
+
+
+def test_read_odds_file_fails_fast_on_malformed_row(tmp_path):
+    bad = tmp_path / "bad.csv"
+    _write(bad, [{"match_id": "X", "odds_home": "not-a-number", "odds_draw": "4.0",
+                  "odds_away": "4.0"}])
+    with pytest.raises(ValueError, match="bad odds row"):
+        read_odds_file(bad)
+    # A malformed source likewise propagates through the consensus reader.
+    with pytest.raises(ValueError, match="bad odds row"):
+        build_consensus([bad], tmp_path / "out.csv")

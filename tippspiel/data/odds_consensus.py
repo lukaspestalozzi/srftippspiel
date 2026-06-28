@@ -20,27 +20,16 @@ import argparse
 import csv
 from pathlib import Path
 
-from tippspiel.data.file_provider import _devig_proportional
+from tippspiel.data.file_provider import read_odds_file
 
 
 def _read_source(path: Path) -> dict[str, tuple[float, float, float]]:
-    """De-vigged (p_home, p_draw, p_away) per match_id from one odds.csv-schema file ({} if absent)."""
-    if not path.exists():
-        return {}
-    out: dict[str, tuple[float, float, float]] = {}
-    with path.open(newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            mid = (row.get("match_id") or "").strip()
-            if not mid:
-                continue
-            try:
-                o = _devig_proportional(
-                    float(row["odds_home"]), float(row["odds_draw"]), float(row["odds_away"])
-                )
-            except (ValueError, ZeroDivisionError, KeyError):
-                continue
-            out[mid] = (o.p_home, o.p_draw, o.p_away)
-    return out
+    """De-vigged (p_home, p_draw, p_away) per match_id from one odds.csv-schema file ({} if absent).
+
+    Uses the shared ``read_odds_file`` reader, so a malformed source fails fast with file context
+    rather than silently dropping rows.
+    """
+    return {mid: (o.p_home, o.p_draw, o.p_away) for mid, o in read_odds_file(path).items()}
 
 
 def build_consensus(sources: list[str | Path], out_path: str | Path,
@@ -55,6 +44,12 @@ def build_consensus(sources: list[str | Path], out_path: str | Path,
         weights = [1.0] * len(paths)
     if len(weights) != len(paths):
         raise ValueError("weights must match the number of sources")
+    # Negative weights can yield negative/zero blended probabilities (invalid 1/p odds); an all-zero
+    # set would silently drop every fixture. Reject both up front.
+    if any(w < 0 for w in weights):
+        raise ValueError("weights must be non-negative")
+    if sum(weights) <= 0:
+        raise ValueError("weights must sum to a positive value")
     parsed = [_read_source(p) for p in paths]
 
     all_ids = sorted({mid for src in parsed for mid in src})
