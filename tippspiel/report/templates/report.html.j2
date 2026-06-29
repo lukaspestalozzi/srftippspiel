@@ -168,7 +168,7 @@
     <div class="card"><details>
       <summary>
         <span><span class="badge">{{ fx.stage }}</span> {{ fx.home }} vs {{ fx.away }}
-          {% if fx.played %}<span class="played">· {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% if fx.tip_outcome %} <span class="tag tag-{{ fx.tip_outcome.cls }}">{{ fx.tip_outcome.label }} · {{ fx.tip_outcome.points }}/{{ fx.tip_outcome.max }} pts</span>{% endif %}{% endif %}
+          {% if fx.played %}<span class="played">· FT {{ fx.result.home_goals }}–{{ fx.result.away_goals }}</span>{% if fx.tip_outcome %} <span class="tag tag-{{ fx.tip_outcome.cls }}">{{ fx.tip_outcome.label }} · {{ fx.tip_outcome.points }}/{{ fx.tip_outcome.max }} pts</span>{% endif %}{% endif %}
         </span>
         <span class="summary-right">{{ fx.kickoff | localtime }}{% if fx.tip %} · Recommended tip <b class="tip-score">{{ fx.tip.home }}–{{ fx.tip.away }}</b> <span class="badge">EV {{ "%.2f"|format(fx.tip.ev) }} pts (doubled)</span>{% if fx.market_tip %} <span class="meta">· Market-odds tip: {{ fx.market_tip.home }}–{{ fx.market_tip.away }} (EV {{ "%.2f"|format(fx.market_tip.ev) }}{% if fx.market_tip.points is not none %}, scored {{ fx.market_tip.points }} pts{% endif %})</span>{% endif %}{% else %} · participants TBD{% endif %}</span>
       </summary>
