@@ -1,9 +1,12 @@
 """Maintainer tool: record finished matches into the corpus + thin ``results.csv`` + snapshot.
 
-Offline, **not on the runtime path** (mirrors ``espn_odds_fetch``). Reads ``fixtures.csv``, finds
-fixtures whose kickoff has passed and that aren't yet in ``results.csv``, and looks up the
-full-time score from the same ESPN scoreboard JSON used for odds (events with
-``status.type.state == "post"``).
+Offline, **not on the runtime path** (mirrors ``espn_odds_fetch``). Takes the same tippable
+fixture list the odds fetchers use (:func:`load_tippable_fixtures`) — group matches **and**
+knockout matches whose participants the played results have already settled (KO rows store their
+participants as structural refs ``W:A``/``R:B``/``3RD:…``, so the raw ``fixtures.csv`` rows would
+otherwise be skipped and no KO result ever recorded) — keeps those whose kickoff has passed and
+that aren't yet in ``results.csv``, and looks up the full-time score from the same ESPN scoreboard
+JSON used for odds (events with ``status.type.state == "post"``).
 
 Under the corpus model a score is recorded in **one reviewed step** (``--write``):
   * the score fills the match's row in ``international_results.csv`` (or appends one), and
@@ -13,8 +16,10 @@ Under the corpus model a score is recorded in **one reviewed step** (``--write``
 Run **without** ``--write`` first: it prints each candidate (``match_id  HOME h-a AWAY
 (corpus_date) [filled|exists|appended]``) so you can **dual-source** the scores (e.g. against
 FIFA/Wikipedia) before committing — this tool is one of the two sources, not a replacement.
-Knockout matches level after 90' may have gone to penalties; ``winner_team_id`` is left blank and
-flagged on stderr for the maintainer to fill in by hand.
+For a knockout match level after 90' the shootout winner is read from the scoreboard's
+``shootoutScore`` and written to ``winner_team_id`` (printed as ``pens:<WINNER>`` for review); it
+is left blank and flagged on stderr only when the feed carries no shootout score, for the
+maintainer to fill in by hand.
 
 Usage (run from the repo root, network required for the fetch)::
 
@@ -41,11 +46,11 @@ from tippspiel.data.espn_common import (
     REPO,
     fetch_scoreboard,
     find_event,
-    load_concrete_fixtures,
     load_played_match_ids,
     load_team_names,
     load_teams,
 )
+from tippspiel.data.fixture_resolve import load_tippable_fixtures
 from tippspiel.data.historical_results_adapter import DEFAULT_CORPUS, corpus_name_for
 
 _THIN_FIELDS = ["match_id", "date", "winner_team_id"]
@@ -68,19 +73,37 @@ def _score(competitor: dict) -> str | None:
     return None if raw is None else str(raw)
 
 
-def fetch_results(tournament: str, slug: str) -> list[dict]:
+def _pens(competitor: dict) -> int | None:
+    """The competitor's penalty-shootout score, if the scoreboard carries one (else ``None``)."""
+    raw = competitor.get("shootoutScore")
+    if isinstance(raw, dict):
+        raw = raw.get("displayValue") or raw.get("value")
+    try:
+        return int(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_results(tournament: str, slug: str, *, now: datetime | None = None) -> list[dict]:
     """Return score rows for ``tournament``'s finished, unrecorded matches (network).
 
     Each row: ``match_id, home_id, away_id, home_goals, away_goals, stage, date (YYYY-MM-DD),
-    venue_country, shootout``. Diagnostics (not-final / missing / shootout) go to stderr.
+    venue_country, shootout, winner_team_id``. For a knockout match level after 90' the shootout
+    winner is read from the scoreboard's ``shootoutScore`` and put in ``winner_team_id``; only a
+    shootout the feed doesn't price is left blank for the maintainer. Diagnostics (not-final /
+    missing / shootout-needs-manual) go to stderr.
+
+    ``now`` (defaults to the current UTC time) is the cutoff for "kickoff has passed"; tests pass a
+    fixed value so the candidate list doesn't depend on the wall clock.
     """
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
     played = load_played_match_ids(tdir)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now or datetime.now(timezone.utc)
     candidates = [
-        f for f in load_concrete_fixtures(tdir)
-        if f["match_id"] not in played and f["kickoff_utc"] < now
+        f for f in load_tippable_fixtures(tdir)
+        if f["match_id"] not in played
+        and datetime.fromisoformat(f["kickoff_utc"].replace("Z", "+00:00")) < now
     ]
     scoreboard = fetch_scoreboard(slug, sorted({d for f in candidates for d in _date_window(f["date"])}))
 
@@ -97,19 +120,26 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
                 not_final.append(f["match_id"])
                 continue
             comp = (event.get("competitions") or [{}])[0]
-            scores = {ids.get(c.get("homeAway")): _score(c) for c in comp.get("competitors", [])}
+            competitors = comp.get("competitors", [])
+            scores = {ids.get(c.get("homeAway")): _score(c) for c in competitors}
+            pens = {ids.get(c.get("homeAway")): _pens(c) for c in competitors}
             if scores.get(f["home_id"]) is None or scores.get(f["away_id"]) is None:
                 missing.append(f["match_id"])
                 continue
             hg, ag = int(scores[f["home_id"]]), int(scores[f["away_id"]])
             shootout = f["stage"] != "GROUP" and hg == ag
+            winner_team_id = ""
             if shootout:
-                shootout_watch.append(f["match_id"])
+                ph, pa = pens.get(f["home_id"]), pens.get(f["away_id"])
+                if ph is not None and pa is not None and ph != pa:
+                    winner_team_id = f["home_id"] if ph > pa else f["away_id"]
+                else:
+                    shootout_watch.append(f["match_id"])  # no usable shootout score -> by hand
             rows.append({
                 "match_id": f["match_id"], "home_id": f["home_id"], "away_id": f["away_id"],
                 "home_goals": hg, "away_goals": ag, "stage": f["stage"],
                 "date": f["kickoff_utc"][:10], "venue_country": f.get("venue_country", ""),
-                "shootout": shootout,
+                "shootout": shootout, "winner_team_id": winner_team_id,
             })
         except Exception:  # noqa: BLE001 — one bad fixture shouldn't abort the run
             missing.append(f["match_id"])
@@ -118,8 +148,9 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
     if missing:
         print(f"# no finished-match scoreboard entry found: {missing}", file=sys.stderr)
     if shootout_watch:
-        print(f"# level after 90' in a knockout match -- fill winner_team_id by hand once the "
-              f"shootout result is known: {shootout_watch}", file=sys.stderr)
+        print(f"# level after 90' in a knockout match but no shootout score in the feed -- fill "
+              f"winner_team_id by hand once the shootout result is known: {shootout_watch}",
+              file=sys.stderr)
     return rows
 
 
@@ -160,7 +191,9 @@ def record_results(
             "match_id": r["match_id"], "home": hc, "away": ac,
             "home_goals": r["home_goals"], "away_goals": r["away_goals"],
             "corpus_date": corpus_date, "action": action,
-            "winner": "",  # knockout shootout winner filled by hand
+            # Knockout shootout winner, auto-read from the feed's shootoutScore; blank only when the
+            # feed didn't price it (the maintainer then fills it by hand — flagged on stderr).
+            "winner": r.get("winner_team_id", ""),
         })
 
     # Proposed snapshot = day after the latest played corpus date (existing + newly recorded).
@@ -210,8 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         print("no new finished matches to record.", file=sys.stderr)
         return 0
     for p in plan:
-        print(f"{p['match_id']:<8} {p['home']} {p['home_goals']}-{p['away_goals']} {p['away']}  "
-              f"({p['corpus_date']}) [{p['action']}]")
+        pens = f" pens:{p['winner']}" if p["winner"] else ""
+        print(f"{p['match_id']:<8} {p['home']} {p['home_goals']}-{p['away_goals']} {p['away']}{pens}"
+              f"  ({p['corpus_date']}) [{p['action']}]")
     verb = "recorded" if result["written"] else "would record"
     print(f"# {verb} {len(plan)} match(es); snapshot_date -> {result['snapshot']}"
           f"{'' if result['written'] else '  (dry-run; pass --write to commit)'}", file=sys.stderr)
