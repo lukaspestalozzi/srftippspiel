@@ -71,11 +71,25 @@ def _score(competitor: dict) -> str | None:
     return None if raw is None else str(raw)
 
 
+def _pens(competitor: dict) -> int | None:
+    """The competitor's penalty-shootout score, if the scoreboard carries one (else ``None``)."""
+    raw = competitor.get("shootoutScore")
+    if isinstance(raw, dict):
+        raw = raw.get("displayValue") or raw.get("value")
+    try:
+        return int(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_results(tournament: str, slug: str) -> list[dict]:
     """Return score rows for ``tournament``'s finished, unrecorded matches (network).
 
     Each row: ``match_id, home_id, away_id, home_goals, away_goals, stage, date (YYYY-MM-DD),
-    venue_country, shootout``. Diagnostics (not-final / missing / shootout) go to stderr.
+    venue_country, shootout, winner_team_id``. For a knockout match level after 90' the shootout
+    winner is read from the scoreboard's ``shootoutScore`` and put in ``winner_team_id``; only a
+    shootout the feed doesn't price is left blank for the maintainer. Diagnostics (not-final /
+    missing / shootout-needs-manual) go to stderr.
     """
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
@@ -101,19 +115,26 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
                 not_final.append(f["match_id"])
                 continue
             comp = (event.get("competitions") or [{}])[0]
-            scores = {ids.get(c.get("homeAway")): _score(c) for c in comp.get("competitors", [])}
+            competitors = comp.get("competitors", [])
+            scores = {ids.get(c.get("homeAway")): _score(c) for c in competitors}
+            pens = {ids.get(c.get("homeAway")): _pens(c) for c in competitors}
             if scores.get(f["home_id"]) is None or scores.get(f["away_id"]) is None:
                 missing.append(f["match_id"])
                 continue
             hg, ag = int(scores[f["home_id"]]), int(scores[f["away_id"]])
             shootout = f["stage"] != "GROUP" and hg == ag
+            winner_team_id = ""
             if shootout:
-                shootout_watch.append(f["match_id"])
+                ph, pa = pens.get(f["home_id"]), pens.get(f["away_id"])
+                if ph is not None and pa is not None and ph != pa:
+                    winner_team_id = f["home_id"] if ph > pa else f["away_id"]
+                else:
+                    shootout_watch.append(f["match_id"])  # no usable shootout score -> by hand
             rows.append({
                 "match_id": f["match_id"], "home_id": f["home_id"], "away_id": f["away_id"],
                 "home_goals": hg, "away_goals": ag, "stage": f["stage"],
                 "date": f["kickoff_utc"][:10], "venue_country": f.get("venue_country", ""),
-                "shootout": shootout,
+                "shootout": shootout, "winner_team_id": winner_team_id,
             })
         except Exception:  # noqa: BLE001 — one bad fixture shouldn't abort the run
             missing.append(f["match_id"])
@@ -122,8 +143,9 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
     if missing:
         print(f"# no finished-match scoreboard entry found: {missing}", file=sys.stderr)
     if shootout_watch:
-        print(f"# level after 90' in a knockout match -- fill winner_team_id by hand once the "
-              f"shootout result is known: {shootout_watch}", file=sys.stderr)
+        print(f"# level after 90' in a knockout match but no shootout score in the feed -- fill "
+              f"winner_team_id by hand once the shootout result is known: {shootout_watch}",
+              file=sys.stderr)
     return rows
 
 
@@ -164,7 +186,9 @@ def record_results(
             "match_id": r["match_id"], "home": hc, "away": ac,
             "home_goals": r["home_goals"], "away_goals": r["away_goals"],
             "corpus_date": corpus_date, "action": action,
-            "winner": "",  # knockout shootout winner filled by hand
+            # Knockout shootout winner, auto-read from the feed's shootoutScore; blank only when the
+            # feed didn't price it (the maintainer then fills it by hand — flagged on stderr).
+            "winner": r.get("winner_team_id", ""),
         })
 
     # Proposed snapshot = day after the latest played corpus date (existing + newly recorded).
@@ -214,8 +238,9 @@ def main(argv: list[str] | None = None) -> int:
         print("no new finished matches to record.", file=sys.stderr)
         return 0
     for p in plan:
-        print(f"{p['match_id']:<8} {p['home']} {p['home_goals']}-{p['away_goals']} {p['away']}  "
-              f"({p['corpus_date']}) [{p['action']}]")
+        pens = f" pens:{p['winner']}" if p["winner"] else ""
+        print(f"{p['match_id']:<8} {p['home']} {p['home_goals']}-{p['away_goals']} {p['away']}{pens}"
+              f"  ({p['corpus_date']}) [{p['action']}]")
     verb = "recorded" if result["written"] else "would record"
     print(f"# {verb} {len(plan)} match(es); snapshot_date -> {result['snapshot']}"
           f"{'' if result['written'] else '  (dry-run; pass --write to commit)'}", file=sys.stderr)

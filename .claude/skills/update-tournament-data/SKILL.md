@@ -28,27 +28,32 @@ Run from the repo root. For wc2026 the ESPN slug is `fifa.world`.
 python -m tippspiel.data.espn_results_fetch wc2026 fifa.world                      # dry-run (prints plan)
 python -m tippspiel.data.espn_results_fetch wc2026 fifa.world --write --config config.yaml
 
-# 2. ODDS — fetch both sources into sidecars, then blend into the consumed odds.csv
+# 2. VALIDATE THE RESULTS NOW — fail-fast gate before spending the odds/Elo fetches. A recorded
+#    result that can't be read back (e.g. a knockout join issue) surfaces here with a clear message
+#    instead of as an opaque traceback inside the odds fetch.
+tippspiel validate-data --config config.yaml
+
+# 3. ODDS — fetch both sources into sidecars, then blend into the consumed odds.csv
 python -m tippspiel.data.espn_odds_fetch wc2026 fifa.world --out tippspiel/data/tournaments/wc2026/odds_espn.csv
 python -m tippspiel.data.polymarket_odds_fetch wc2026                                  # -> odds_polymarket.csv
 python -m tippspiel.data.odds_consensus tippspiel/data/tournaments/wc2026/odds.csv \
     tippspiel/data/tournaments/wc2026/odds_espn.csv tippspiel/data/tournaments/wc2026/odds_polymarket.csv
 
-# 3. ELO (elo + att/def, from the grown corpus)
+# 4. ELO (elo + att/def, from the grown corpus)
 tippspiel fit-ratings --config config.yaml
 
-# 4. VALIDATE
+# 5. VALIDATE (full) + tests
 tippspiel validate-data --config config.yaml
 python -m pytest -q          # NOT bare `pytest` — see Environment
 ruff check tippspiel tests
 
-# 5. COMMIT only if something actually changed (see Commit gate)
+# 6. COMMIT only if something actually changed (see Commit gate)
 ```
 
 Step 1 (`--write`) does the whole "record a result" operation: it fills each match's score into the
 corpus (or appends a row), appends the thin `results.csv` row, and **advances
 `offdef.snapshot_date`** to the day after the latest played date — no manual two-place transcription
-and no manual snapshot bump. Step 3 then recomputes Elo from that grown corpus.
+and no manual snapshot bump. Step 4 then recomputes Elo from that grown corpus.
 
 **Idempotence:** every step is a no-op when nothing's new. Re-running `espn_results_fetch` skips
 matches already in `results.csv`; `fit-ratings` is deterministic and only moves Elo when the corpus
@@ -104,16 +109,24 @@ propagates into both standings and the Elo fit. Once verified, re-run with
 `--write --config config.yaml`.
 
 How it works (under the hood):
-- It finds fixtures whose `kickoff_utc` has passed and that aren't yet in `results.csv`, looks up the
-  full-time score from the ESPN scoreboard JSON (events with `status.type.state == "post"`; in-play
-  or not-yet-final matches are reported and skipped), and maps ESPN names to repo `team_id`s.
+- The candidate list comes from `fixture_resolve.load_tippable_fixtures` — the **same resolver the
+  ESPN and Polymarket odds fetchers use** — so it covers **group matches and knockout matches whose
+  participants the played results already settle** (KO rows store participants as structural refs
+  `W:A`/`R:B`/`3RD:74:…`, resolved to concrete teams from the results so far). It keeps those whose
+  `kickoff_utc` has passed and that aren't yet in `results.csv`, looks up the full-time score from
+  the ESPN scoreboard JSON (events with `status.type.state == "post"`; in-play or not-yet-final
+  matches are reported and skipped), and maps ESPN names to repo `team_id`s. *(All three fetchers
+  share `load_tippable_fixtures`; an earlier divergence — the results fetcher alone using the
+  raw-fixtures helper — was exactly why knockout results were never found.)*
 - On `--write` it fills the match's row in the corpus (matched by date **±1 day** + the unordered
   team pair, oriented to that row's home team), appends the thin `results.csv` row, and advances
   `offdef.snapshot_date`. Code: `tippspiel/data/espn_results_fetch.py` (`record_results`) +
   `tippspiel/data/corpus_update.py` (`set_corpus_score`).
-- **Knockout shootouts:** a knockout match level after 90' is flagged on stderr; `winner_team_id` is
-  left blank — fill it in `results.csv` by hand once the shootout result is known (the 120-minute
-  scoreline stays in the corpus; the thin row carries only the winner).
+- **Knockout shootouts:** for a knockout match level after 90' the shootout winner is read
+  automatically from the scoreboard's `shootoutScore` and written to `winner_team_id`. It's left
+  blank (and flagged on stderr) **only** when the feed doesn't carry the shootout score — then fill
+  it in `results.csv` by hand. The 120-minute scoreline stays in the corpus; the thin row carries
+  the winner. Always eyeball the printed `pens:<WINNER>` against a second source before `--write`.
 
 `tippspiel validate-data` then asserts every `results.csv` row resolves to exactly one corpus match.
 
@@ -128,6 +141,12 @@ How it works (under the hood):
   unplayed ones stay out). Don't bump it past an unplayed matchday.
 - **Future knockout rows aren't in the corpus yet** (participants TBD), so a KO match takes the
   `[appended]` path with `neutral` inferred from the venue; group matches are always `[filled]`.
+- **A recorded KO result is read back by resolving the bracket, not from its fixture row.** A live
+  KO fixture keeps structural-ref participants (`W:A`/`3RD:74:…`), so `FileDataProvider.get_results`
+  resolves a played KO match's two teams in layers (group results → R32 → R16 → …, reusing the
+  report's `resolve_known_participants`) before joining its corpus scoreline. `fixtures.csv` stays
+  declarative — you never hand-edit refs to concrete teams. If `validate-data` reports a KO row as
+  unresolved, the cause is an earlier round's result missing/incorrect, not the KO row itself.
 
 ## Odds — two sources, blended into one `odds.csv`
 

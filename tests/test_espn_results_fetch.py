@@ -71,3 +71,25 @@ def test_fetch_results_records_resolved_knockout_match(monkeypatch):
     assert rows[0]["match_id"] == "M75"
     assert rows[0]["stage"] == "R32"
     assert (rows[0]["home_goals"], rows[0]["away_goals"]) == (2, 1)
+
+
+def test_fetch_results_auto_fills_shootout_winner(monkeypatch):
+    """A knockout match level after 90' should take its winner_team_id from the feed's
+    shootoutScore, not leave it blank for the maintainer."""
+    monkeypatch.setattr(erf, "load_teams", lambda tdir: {"germany": "GER", "paraguay": "PAR"})
+    monkeypatch.setattr(erf, "load_played_match_ids", lambda tdir: set())
+    monkeypatch.setattr(erf, "load_tippable_fixtures", lambda tdir: [{
+        "match_id": "M74", "stage": "R32", "date": "20260629",
+        "home_id": "GER", "away_id": "PAR", "kickoff_utc": "2026-06-29T20:00:00+00:00",
+        "venue_country": "USA",
+    }])
+    event = _event("Germany", "Paraguay", 1, 1)
+    competitors = event["competitions"][0]["competitors"]
+    competitors[0]["shootoutScore"] = 3  # Germany
+    competitors[1]["shootoutScore"] = 4  # Paraguay wins the shootout
+    monkeypatch.setattr(erf, "fetch_scoreboard", lambda slug, dates: {"20260629": [event]})
+
+    rows = fetch_results("wc2026", "fifa.world")
+    assert len(rows) == 1
+    assert rows[0]["shootout"] is True
+    assert rows[0]["winner_team_id"] == "PAR"
