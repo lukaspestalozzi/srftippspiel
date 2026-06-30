@@ -1,9 +1,12 @@
 """Maintainer tool: record finished matches into the corpus + thin ``results.csv`` + snapshot.
 
-Offline, **not on the runtime path** (mirrors ``espn_odds_fetch``). Reads ``fixtures.csv``, finds
-fixtures whose kickoff has passed and that aren't yet in ``results.csv``, and looks up the
-full-time score from the same ESPN scoreboard JSON used for odds (events with
-``status.type.state == "post"``).
+Offline, **not on the runtime path** (mirrors ``espn_odds_fetch``). Takes the same tippable
+fixture list the odds fetchers use (:func:`load_tippable_fixtures`) — group matches **and**
+knockout matches whose participants the played results have already settled (KO rows store their
+participants as structural refs ``W:A``/``R:B``/``3RD:…``, so the raw ``fixtures.csv`` rows would
+otherwise be skipped and no KO result ever recorded) — keeps those whose kickoff has passed and
+that aren't yet in ``results.csv``, and looks up the full-time score from the same ESPN scoreboard
+JSON used for odds (events with ``status.type.state == "post"``).
 
 Under the corpus model a score is recorded in **one reviewed step** (``--write``):
   * the score fills the match's row in ``international_results.csv`` (or appends one), and
@@ -41,11 +44,11 @@ from tippspiel.data.espn_common import (
     REPO,
     fetch_scoreboard,
     find_event,
-    load_concrete_fixtures,
     load_played_match_ids,
     load_team_names,
     load_teams,
 )
+from tippspiel.data.fixture_resolve import load_tippable_fixtures
 from tippspiel.data.historical_results_adapter import DEFAULT_CORPUS, corpus_name_for
 
 _THIN_FIELDS = ["match_id", "date", "winner_team_id"]
@@ -77,10 +80,11 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
     played = load_played_match_ids(tdir)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(timezone.utc)
     candidates = [
-        f for f in load_concrete_fixtures(tdir)
-        if f["match_id"] not in played and f["kickoff_utc"] < now
+        f for f in load_tippable_fixtures(tdir)
+        if f["match_id"] not in played
+        and datetime.fromisoformat(f["kickoff_utc"].replace("Z", "+00:00")) < now
     ]
     scoreboard = fetch_scoreboard(slug, sorted({d for f in candidates for d in _date_window(f["date"])}))
 
