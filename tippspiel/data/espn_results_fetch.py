@@ -16,8 +16,10 @@ Under the corpus model a score is recorded in **one reviewed step** (``--write``
 Run **without** ``--write`` first: it prints each candidate (``match_id  HOME h-a AWAY
 (corpus_date) [filled|exists|appended]``) so you can **dual-source** the scores (e.g. against
 FIFA/Wikipedia) before committing — this tool is one of the two sources, not a replacement.
-Knockout matches level after 90' may have gone to penalties; ``winner_team_id`` is left blank and
-flagged on stderr for the maintainer to fill in by hand.
+For a knockout match level after 90' the shootout winner is read from the scoreboard's
+``shootoutScore`` and written to ``winner_team_id`` (printed as ``pens:<WINNER>`` for review); it
+is left blank and flagged on stderr only when the feed carries no shootout score, for the
+maintainer to fill in by hand.
 
 Usage (run from the repo root, network required for the fetch)::
 
@@ -82,7 +84,7 @@ def _pens(competitor: dict) -> int | None:
         return None
 
 
-def fetch_results(tournament: str, slug: str) -> list[dict]:
+def fetch_results(tournament: str, slug: str, *, now: datetime | None = None) -> list[dict]:
     """Return score rows for ``tournament``'s finished, unrecorded matches (network).
 
     Each row: ``match_id, home_id, away_id, home_goals, away_goals, stage, date (YYYY-MM-DD),
@@ -90,11 +92,14 @@ def fetch_results(tournament: str, slug: str) -> list[dict]:
     winner is read from the scoreboard's ``shootoutScore`` and put in ``winner_team_id``; only a
     shootout the feed doesn't price is left blank for the maintainer. Diagnostics (not-final /
     missing / shootout-needs-manual) go to stderr.
+
+    ``now`` (defaults to the current UTC time) is the cutoff for "kickoff has passed"; tests pass a
+    fixed value so the candidate list doesn't depend on the wall clock.
     """
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
     played = load_played_match_ids(tdir)
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     candidates = [
         f for f in load_tippable_fixtures(tdir)
         if f["match_id"] not in played

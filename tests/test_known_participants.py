@@ -102,8 +102,9 @@ def test_undetermined_slots_are_left_untouched(wc2026):
     original = _by_id(fixtures)
     # A knockout slot fed by the winner/loser of a match that hasn't been played yet must stay a
     # reference. Checked generically (over every WIN:/LOSE: side whose feeder isn't in the results)
-    # so the assertion survives the live wc2026 data moving forward as matchdays are recorded.
-    checked = 0
+    # so the assertion survives the live wc2026 data moving forward as matchdays are recorded. No
+    # `assert checked > 0`: once the tournament is complete there are legitimately no open
+    # downstream slots left, and the invariant below still holds (vacuously).
     for mid, m in original.items():
         if m.group is not None:
             continue
@@ -111,8 +112,6 @@ def test_undetermined_slots_are_left_untouched(wc2026):
             r = ref_side.ko_ref
             if r and r.kind in ("winner_of", "loser_of") and r.match_id not in results:
                 assert resolved_side == ref_side  # feeder not played -> slot unchanged
-                checked += 1
-    assert checked > 0  # the live bracket must still have open downstream slots
     # The group stage is complete, so every third-place slot has been allocated to a concrete team;
     # no third_pooled reference remains anywhere in the bracket.
     for m in resolved.values():

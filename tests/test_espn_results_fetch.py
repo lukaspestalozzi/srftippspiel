@@ -1,7 +1,13 @@
 """Tests for the results-recording fetch tool (tippspiel/data/espn_results_fetch.py)."""
 
+from datetime import datetime, timezone
+
 import tippspiel.data.espn_results_fetch as erf
 from tippspiel.data.espn_results_fetch import _date_window, fetch_results
+
+# Fixed "now" so the kickoff-has-passed filter is deterministic, not wall-clock dependent (after
+# every fixture date used below).
+_NOW = datetime(2026, 7, 15, tzinfo=timezone.utc)
 
 
 def test_date_window_spans_neighbouring_days():
@@ -27,7 +33,6 @@ def test_fetch_results_finds_match_listed_under_previous_local_date(monkeypatch)
     *local* date; the scoreboard lookup must search the ±1-day window or it's permanently skipped.
     """
     # Fixture dated 2026-06-18 (UTC), but ESPN lists the event under 2026-06-17 (local).
-    # Fixture dated 2026-06-18 (UTC), but ESPN lists the event under 2026-06-17 (local).
     monkeypatch.setattr(erf, "load_teams", lambda tdir: {"uzbekistan": "UZB", "colombia": "COL"})
     monkeypatch.setattr(erf, "load_played_match_ids", lambda tdir: set())
     monkeypatch.setattr(erf, "load_tippable_fixtures", lambda tdir: [{
@@ -40,7 +45,7 @@ def test_fetch_results_finds_match_listed_under_previous_local_date(monkeypatch)
         lambda slug, dates: {"20260617": [_event("Uzbekistan", "Colombia", 1, 3)]},
     )
 
-    rows = fetch_results("wc2026", "fifa.world")
+    rows = fetch_results("wc2026", "fifa.world", now=_NOW)
     assert len(rows) == 1
     row = rows[0]
     assert row["match_id"] == "G_K_2"
@@ -66,7 +71,7 @@ def test_fetch_results_records_resolved_knockout_match(monkeypatch):
         lambda slug, dates: {"20260630": [_event("Brazil", "France", 2, 1)]},
     )
 
-    rows = fetch_results("wc2026", "fifa.world")
+    rows = fetch_results("wc2026", "fifa.world", now=_NOW)
     assert len(rows) == 1
     assert rows[0]["match_id"] == "M75"
     assert rows[0]["stage"] == "R32"
@@ -89,7 +94,7 @@ def test_fetch_results_auto_fills_shootout_winner(monkeypatch):
     competitors[1]["shootoutScore"] = 4  # Paraguay wins the shootout
     monkeypatch.setattr(erf, "fetch_scoreboard", lambda slug, dates: {"20260629": [event]})
 
-    rows = fetch_results("wc2026", "fifa.world")
+    rows = fetch_results("wc2026", "fifa.world", now=_NOW)
     assert len(rows) == 1
     assert rows[0]["shootout"] is True
     assert rows[0]["winner_team_id"] == "PAR"
