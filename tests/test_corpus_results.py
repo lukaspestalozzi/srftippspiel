@@ -122,6 +122,83 @@ def test_provider_dual_mode(tmp_path):
     assert (by_id["G_A_2"].home_goals, by_id["G_A_2"].away_goals) == (3, 1)  # inline
 
 
+def _ko_bracket(tmp_path, *, ko_result_row: str):
+    """A 2-group bracket whose single knockout fixture keeps reference participants (``W:A``/``W:B``)
+    -- the live-tournament shape. ``ko_result_row`` is the M1 row appended to results.csv."""
+    (tmp_path / "teams.csv").write_text(
+        "team_id,name,elo\nQAT,Qatar,1500\nECU,Ecuador,1600\nSEN,Senegal,1700\nNED,Netherlands,1900\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "fixtures.csv").write_text(
+        "match_id,stage,group,home_ref,away_ref,kickoff_utc,venue_country\n"
+        "G_A_1,GROUP,A,QAT,ECU,2022-11-20T16:00:00Z,QAT\n"
+        "G_B_1,GROUP,B,SEN,NED,2022-11-21T16:00:00Z,QAT\n"
+        "M1,R16,,W:A,W:B,2022-12-03T16:00:00Z,QAT\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "results.csv").write_text(
+        "match_id,date,home_goals,away_goals,winner_team_id\n"
+        "G_A_1,2022-11-20,,,\n"
+        "G_B_1,2022-11-21,,,\n" + ko_result_row,
+        encoding="utf-8",
+    )
+    corpus = tmp_path / "corpus.csv"
+    corpus.write_text(
+        "date,home_team,away_team,home_score,away_score,tournament,city,country,neutral\n"
+        "2022-11-20,Qatar,Ecuador,2,0,FIFA World Cup,Al Khor,Qatar,FALSE\n"
+        "2022-11-21,Senegal,Netherlands,0,1,FIFA World Cup,Al Khor,Qatar,FALSE\n"
+        "2022-12-03,Qatar,Netherlands,1,3,FIFA World Cup,Al Khor,Qatar,TRUE\n",
+        encoding="utf-8",
+    )
+    return FileDataProvider(
+        tmp_path / "teams.csv", tmp_path / "fixtures.csv", tmp_path / "results.csv",
+        corpus_file=corpus,
+    )
+
+
+def test_provider_resolves_knockout_corpus_ref(tmp_path):
+    # A played knockout match stored as a thin corpus reference: its participants are only implied
+    # by the group results (W:A=Qatar beat Ecuador, W:B=Netherlands beat Senegal), so get_results
+    # must resolve the bracket before it can join M1's scoreline from the corpus.
+    provider = _ko_bracket(tmp_path, ko_result_row="M1,2022-12-03,,,\n")
+    by_id = {r.match_id: r for r in provider.get_results()}
+    assert (by_id["M1"].home_goals, by_id["M1"].away_goals) == (1, 3)  # Qatar 1-3 Netherlands
+
+
+def test_provider_unresolvable_knockout_raises(tmp_path):
+    # The knockout match references a group whose result is missing, so its participants stay open
+    # and the corpus join cannot proceed -- this must raise rather than silently drop the row.
+    (tmp_path / "teams.csv").write_text(
+        "team_id,name,elo\nQAT,Qatar,1500\nECU,Ecuador,1600\nSEN,Senegal,1700\nNED,Netherlands,1900\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "fixtures.csv").write_text(
+        "match_id,stage,group,home_ref,away_ref,kickoff_utc,venue_country\n"
+        "G_A_1,GROUP,A,QAT,ECU,2022-11-20T16:00:00Z,QAT\n"
+        "G_B_1,GROUP,B,SEN,NED,2022-11-21T16:00:00Z,QAT\n"
+        "M1,R16,,W:A,W:B,2022-12-03T16:00:00Z,QAT\n",
+        encoding="utf-8",
+    )
+    # Group B has no result -> W:B is undetermined -> M1 cannot resolve.
+    (tmp_path / "results.csv").write_text(
+        "match_id,date,home_goals,away_goals,winner_team_id\n"
+        "G_A_1,2022-11-20,,,\nM1,2022-12-03,,,\n",
+        encoding="utf-8",
+    )
+    corpus = tmp_path / "corpus.csv"
+    corpus.write_text(
+        "date,home_team,away_team,home_score,away_score,tournament,city,country,neutral\n"
+        "2022-11-20,Qatar,Ecuador,2,0,FIFA World Cup,Al Khor,Qatar,FALSE\n",
+        encoding="utf-8",
+    )
+    provider = FileDataProvider(
+        tmp_path / "teams.csv", tmp_path / "fixtures.csv", tmp_path / "results.csv",
+        corpus_file=corpus,
+    )
+    with pytest.raises(ResultResolutionError):
+        provider.get_results()
+
+
 def test_partial_inline_scoreline_raises(tmp_path):
     # Exactly one of home_goals/away_goals populated is a schema error, caught up front.
     (tmp_path / "teams.csv").write_text("team_id,name,elo\nQAT,Qatar,1500\nECU,Ecuador,1600\n",

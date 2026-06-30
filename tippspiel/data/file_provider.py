@@ -152,19 +152,9 @@ class FileDataProvider(DataProvider):
         with self.results_file.open(newline="", encoding="utf-8") as fh:
             rows = [r for r in csv.DictReader(fh) if r.get("match_id")]
 
-        needs_corpus = any(_is_corpus_ref(r) for r in rows)
-        if needs_corpus:
-            from .corpus_results import (
-                DEFAULT_CORPUS,
-                build_corpus_index,
-                resolve_corpus_result,
-            )
-
-            index = build_corpus_index(self.corpus_file or DEFAULT_CORPUS)
-            fixtures_by_id = {m.match_id: m for m in self.get_fixtures()}
-            name_by_id = {t.team_id: t.name for t in self.get_teams()}
-
-        results: list[Result] = []
+        # Split inline-scoreline rows (resolved directly) from corpus references (joined below).
+        inline: dict[str, Result] = {}
+        corpus_rows: list[tuple[str, str, str | None]] = []  # (match_id, date, winner_team_id)
         for row in rows:
             mid = row["match_id"].strip()
             winner = (row.get("winner_team_id") or "").strip() or None
@@ -175,22 +165,57 @@ class FileDataProvider(DataProvider):
                     f"or neither (a corpus reference)"
                 )
             if _is_corpus_ref(row):
-                results.append(
-                    resolve_corpus_result(
-                        mid, (row.get("date") or "").strip(), winner,
-                        fixtures_by_id, name_by_id, index,
-                    )
-                )
+                corpus_rows.append((mid, (row.get("date") or "").strip(), winner))
             else:
-                results.append(
-                    Result(
-                        match_id=mid,
-                        home_goals=int(row["home_goals"]),
-                        away_goals=int(row["away_goals"]),
-                        winner_team_id=winner,
+                inline[mid] = Result(mid, int(hg), int(ag), winner)
+
+        resolved: dict[str, Result] = dict(inline)
+        if corpus_rows:
+            from .corpus_results import (
+                DEFAULT_CORPUS,
+                ResultResolutionError,
+                build_corpus_index,
+                resolve_corpus_result,
+            )
+            from ..simulation.known_participants import resolve_known_participants
+
+            index = build_corpus_index(self.corpus_file or DEFAULT_CORPUS)
+            fixtures = self.get_fixtures()
+            name_by_id = {t.team_id: t.name for t in self.get_teams()}
+            thirds = self.get_thirds_allocation()
+
+            # A live tournament keeps knockout participants as references (W:A / 3RD:74:… /
+            # WIN:M101), so a played knockout match's two teams aren't in its static fixture row —
+            # they're implied by earlier results. Resolve in layers: each pass concretises the
+            # knockout slots the results so far already settle (the same deterministic
+            # ``resolve_known_participants`` the report uses), which lets the next pass read those
+            # matches' corpus scorelines. Group/inline rows resolve on the first pass; deeper
+            # rounds cascade. The loop stops when a pass makes no progress — then the first
+            # still-unresolved row is resolved once more to raise its descriptive error.
+            pending = corpus_rows
+            while pending:
+                fx_by_id = {
+                    m.match_id: m
+                    for m in resolve_known_participants(fixtures, resolved, thirds)
+                }
+                still: list[tuple[str, str, str | None]] = []
+                for mid, date, winner in pending:
+                    fx = fx_by_id.get(mid)
+                    if fx is not None and fx.home.is_concrete and fx.away.is_concrete:
+                        resolved[mid] = resolve_corpus_result(
+                            mid, date, winner, fx_by_id, name_by_id, index
+                        )
+                    else:
+                        still.append((mid, date, winner))
+                if len(still) == len(pending):  # no progress -> surface the proper error
+                    mid, date, winner = still[0]
+                    resolve_corpus_result(mid, date, winner, fx_by_id, name_by_id, index)
+                    raise ResultResolutionError(  # defensive: the call above should have raised
+                        f"results row {mid!r}: knockout participants are not yet determined"
                     )
-                )
-        return results
+                pending = still
+
+        return [resolved[r["match_id"].strip()] for r in rows]
 
     def get_thirds_allocation(self) -> dict:
         """Optional explicit third-place combination->slot table; {} if not supplied."""
