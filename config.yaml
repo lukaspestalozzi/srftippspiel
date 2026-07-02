@@ -79,10 +79,11 @@ tournament:
   elo_source: "corpus-derived (World-Football-Elo via fit-ratings, calibrated k_scale 1.4 / home_advantage 60). Group stage complete; the first 4 round-of-32 results added to the corpus & results.csv (RSA-CAN 0-1, GER-PAR 1-1 pens PAR, NED-MAR 1-1 pens MAR, BRA-JPN 2-1); snapshot_date bumped to 2026-07-01 (day after the latest played match) and elo + off/def re-fitted from the grown corpus. Odds re-fetched from ESPN + Polymarket consensus (now pricing the resolvable knockout fixtures)."
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
-  # derived from fixtures.csv. An explicit third-place combination->slot table can be added
-  # here once the official FIFA 'Annex C' is confirmed; absent, a constraint-respecting
-  # bipartite matching is used (see tippspiel/simulation/bracket.py).
-  # thirds_allocation_file: thirds_allocation.json
+  # derived from fixtures.csv. The sidecar pins the official third-place slot allocation for
+  # the combination that actually qualified (B/D/E/F/I/J/K/L, announced after the group
+  # stage): slot 82 gets group I's third (SEN), slot 85 group J's (ALG). The bipartite-
+  # matching fallback (tippspiel/simulation/bracket.py) picked the valid-but-wrong swap.
+  thirds_allocation_file: thirds_allocation.json
 
 # Bonus questions are tournament-specific (SRF pool, Swiss-focused, German labels).
 bonus_questions:
