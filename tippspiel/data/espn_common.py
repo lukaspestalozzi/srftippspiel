@@ -11,6 +11,7 @@ import csv
 import json
 import time
 import urllib.request
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import tippspiel
@@ -97,6 +98,16 @@ def load_played_match_ids(tdir: Path) -> set[str]:
         return set()
     with path.open(newline="", encoding="utf-8") as fh:
         return {row["match_id"] for row in csv.DictReader(fh)}
+
+
+def date_window(yyyymmdd: str) -> list[str]:
+    """``[day-1, day, day+1]`` as ``YYYYMMDD``. ESPN files a match under its *local* date, which
+    can be the day before a late-UTC kickoff at a western venue (e.g. WC2026 M85 kicks off
+    ``…T03:00:00Z`` but ESPN lists it the prior local day). Both fetchers search this window so
+    the scoreboard lookup is as offset-tolerant as the ±1-day corpus join.
+    """
+    day = datetime.strptime(yyyymmdd, "%Y%m%d").date()
+    return [(day + timedelta(days=delta)).strftime("%Y%m%d") for delta in (-1, 0, 1)]
 
 
 def fetch_scoreboard(slug: str, dates: list[str]) -> dict[str, list]:

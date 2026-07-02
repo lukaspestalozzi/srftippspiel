@@ -37,6 +37,7 @@ from pathlib import Path
 
 from tippspiel.data.espn_common import (
     REPO,
+    date_window,
     fetch_scoreboard,
     find_event,
     get_json,
@@ -98,13 +99,17 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
     # Group matches plus any knockout fixtures the played results have already settled.
     fixtures = load_tippable_fixtures(tdir)
 
-    dates = sorted({f["date"] for f in fixtures})
+    # ESPN files a match under its *local* date, which can precede a late-UTC kickoff at a
+    # western venue — search the same ±1-day window the results fetcher uses, or evening games
+    # in the Americas (e.g. WC2026 M85, kickoff 03:00Z) never get priced.
+    dates = sorted({d for f in fixtures for d in date_window(f["date"])})
     scoreboard = fetch_scoreboard(slug, dates)
 
     rows_out, missing = [], []
     for f in fixtures:
         try:
-            found = find_event(scoreboard.get(f["date"], []), teams, f["home_id"], f["away_id"])
+            events = [e for d in date_window(f["date"]) for e in scoreboard.get(d, [])]
+            found = find_event(events, teams, f["home_id"], f["away_id"])
             if found is None:
                 missing.append(f["match_id"])
                 continue
