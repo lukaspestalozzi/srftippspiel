@@ -88,6 +88,8 @@ def frozen_match_ids(tdir: str | Path, *, now: datetime | None = None) -> set[st
     """
     tdir = Path(tdir)
     now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:  # normalise a naive cutoff to UTC, same as the kickoffs below
+        now = now.replace(tzinfo=timezone.utc)
     frozen = set(load_played_match_ids(tdir))
     with (tdir / "fixtures.csv").open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):

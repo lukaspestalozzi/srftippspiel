@@ -37,6 +37,12 @@ def test_frozen_match_ids_played_and_kicked_off(tmp_path):
     assert frozen_match_ids(tdir, now=later) == {"G_A_1", "G_A_2", "M1"}
 
 
+def test_frozen_match_ids_accepts_naive_now(tmp_path):
+    # A naive cutoff is normalised to UTC instead of raising on aware-vs-naive comparison.
+    tdir = _tournament_dir(tmp_path)
+    assert frozen_match_ids(tdir, now=_NOW.replace(tzinfo=None)) == {"G_A_1", "G_A_2"}
+
+
 def test_frozen_match_ids_without_results_file(tmp_path):
     tdir = _tournament_dir(tmp_path)
     (tdir / "results.csv").unlink()

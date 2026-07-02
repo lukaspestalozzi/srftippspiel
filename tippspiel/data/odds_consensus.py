@@ -15,8 +15,8 @@ a historical snapshot and must never change, even if the source sidecars later d
 
 Usage (run from the repo root)::
 
-    python -m tippspiel.data.odds_consensus tournaments/wc2026/odds.csv \\
-        tournaments/wc2026/odds_espn.csv tournaments/wc2026/odds_polymarket.csv
+    D=tippspiel/data/tournaments/wc2026
+    python -m tippspiel.data.odds_consensus $D/odds.csv $D/odds_espn.csv $D/odds_polymarket.csv
 """
 
 from __future__ import annotations
