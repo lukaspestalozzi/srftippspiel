@@ -3,7 +3,8 @@
 from datetime import datetime, timezone
 
 import tippspiel.data.espn_results_fetch as erf
-from tippspiel.data.espn_results_fetch import _date_window, fetch_results
+from tippspiel.data.espn_common import date_window
+from tippspiel.data.espn_results_fetch import fetch_results
 
 # Fixed "now" so the kickoff-has-passed filter is deterministic, not wall-clock dependent (after
 # every fixture date used below).
@@ -11,9 +12,9 @@ _NOW = datetime(2026, 7, 15, tzinfo=timezone.utc)
 
 
 def test_date_window_spans_neighbouring_days():
-    assert _date_window("20260617") == ["20260616", "20260617", "20260618"]
+    assert date_window("20260617") == ["20260616", "20260617", "20260618"]
     # Crosses a month boundary correctly.
-    assert _date_window("20260601") == ["20260531", "20260601", "20260602"]
+    assert date_window("20260601") == ["20260531", "20260601", "20260602"]
 
 
 def _event(home_name, away_name, home_score, away_score):
