@@ -7,8 +7,10 @@ numbers). We read the *moneyline* trio (home / draw / away), which every usable 
 convert American → decimal, and write the repo's ``odds.csv`` schema
 (``match_id,odds_home,odds_draw,odds_away``, raw decimal; de-vig happens at load).
 
-Fixtures already decided in ``results.csv`` are skipped -- ``odds.csv`` only carries upcoming
-matches.
+**Frozen-odds rule:** a match that is recorded in ``results.csv`` or has already kicked off is
+never re-priced, and its existing committed row is preserved verbatim — the file accumulates each
+match's frozen pre-match snapshot while only future fixtures get fresh prices
+(``fixture_resolve.frozen_match_ids`` / ``write_odds_preserving_frozen``).
 
 Provenance and guards:
 - Source: ``site.api.espn.com`` (scoreboard, for fixtures + team names) and
@@ -32,7 +34,7 @@ Usage (run from the repo root, network required)::
 from __future__ import annotations
 
 import argparse
-import csv
+from datetime import datetime
 from pathlib import Path
 
 from tippspiel.data.espn_common import (
@@ -42,7 +44,11 @@ from tippspiel.data.espn_common import (
     get_json,
     load_teams,
 )
-from tippspiel.data.fixture_resolve import load_tippable_fixtures
+from tippspiel.data.fixture_resolve import (
+    frozen_match_ids,
+    load_tippable_fixtures,
+    write_odds_preserving_frozen,
+)
 
 
 def _american_to_decimal(american: float) -> float:
@@ -91,12 +97,18 @@ def _odds_for_event(slug: str, event_id: str) -> tuple[float, float, float] | No
     return None
 
 
-def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -> int:
-    """Fetch ESPN odds for ``tournament``'s fixtures and write ``odds.csv``. Returns rows written."""
+def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None,
+               *, now: datetime | None = None) -> int:
+    """Fetch ESPN odds for ``tournament``'s fixtures and write ``odds.csv``. Returns rows written.
+
+    Frozen-odds rule: played/kicked-off matches (as of ``now``, default current UTC time) are not
+    re-priced and their existing rows are preserved verbatim; only future fixtures are fetched.
+    """
     tdir = REPO / "tippspiel" / "data" / "tournaments" / tournament
     teams = load_teams(tdir)
-    # Group matches plus any knockout fixtures the played results have already settled.
-    fixtures = load_tippable_fixtures(tdir)
+    frozen = frozen_match_ids(tdir, now=now)
+    # Future group matches plus any knockout fixtures the played results have already settled.
+    fixtures = [f for f in load_tippable_fixtures(tdir) if f["match_id"] not in frozen]
 
     dates = sorted({f["date"] for f in fixtures})
     scoreboard = fetch_scoreboard(slug, dates)
@@ -134,13 +146,10 @@ def fetch_odds(tournament: str, slug: str, out_path: str | Path | None = None) -
             continue
 
     out = Path(out_path) if out_path else (tdir / "odds.csv")
-    with out.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["match_id", "odds_home", "odds_draw", "odds_away"])
-        writer.writeheader()
-        writer.writerows(rows_out)
-    print(f"{tournament}: wrote {len(rows_out)} rows to {out} "
-          f"({len(missing)} fixtures without odds: {missing[:8]}{'…' if len(missing) > 8 else ''})")
-    return len(rows_out)
+    total, kept = write_odds_preserving_frozen(out, rows_out, frozen)
+    print(f"{tournament}: wrote {total} rows to {out} ({kept} frozen rows preserved, "
+          f"{len(missing)} fixtures without odds: {missing[:8]}{'…' if len(missing) > 8 else ''})")
+    return total
 
 
 if __name__ == "__main__":

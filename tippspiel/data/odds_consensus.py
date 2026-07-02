@@ -8,6 +8,11 @@ probability triple (the same proportional de-vig the runtime applies at load), t
 the blended probabilities are written back as decimal odds ``1/p`` — so the runtime's load-time
 de-vig is a near-identity and ``odds.csv`` stays the same auditable schema.
 
+**Frozen-odds rule:** when the output file sits in a tournament data dir (``fixtures.csv`` next to
+it), rows for matches that are played or have kicked off are preserved **verbatim** from the
+existing output instead of being re-blended — the committed consensus price of a started match is
+a historical snapshot and must never change, even if the source sidecars later differ.
+
 Usage (run from the repo root)::
 
     python -m tippspiel.data.odds_consensus tournaments/wc2026/odds.csv \\
@@ -17,10 +22,10 @@ Usage (run from the repo root)::
 from __future__ import annotations
 
 import argparse
-import csv
 from pathlib import Path
 
 from tippspiel.data.file_provider import read_odds_file
+from tippspiel.data.fixture_resolve import frozen_match_ids, write_odds_preserving_frozen
 
 
 def _read_source(path: Path) -> dict[str, tuple[float, float, float]]:
@@ -33,11 +38,14 @@ def _read_source(path: Path) -> dict[str, tuple[float, float, float]]:
 
 
 def build_consensus(sources: list[str | Path], out_path: str | Path,
-                    weights: list[float] | None = None) -> int:
+                    weights: list[float] | None = None,
+                    frozen: set[str] | None = None) -> int:
     """Blend ``sources`` (odds.csv-schema files) into ``out_path``. Returns rows written.
 
     ``weights`` is one weight per source (default equal). A match present in a subset of sources is
     averaged over just those, so coverage gaps degrade cleanly rather than dropping the fixture.
+    ``frozen`` match ids keep their existing ``out_path`` row verbatim instead of being re-blended
+    (see the frozen-odds rule in the module docstring); the CLI derives it automatically.
     """
     paths = [Path(s) for s in sources]
     if weights is None:
@@ -77,12 +85,10 @@ def build_consensus(sources: list[str | Path], out_path: str | Path,
         })
 
     out = Path(out_path)
-    with out.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["match_id", "odds_home", "odds_draw", "odds_away"])
-        writer.writeheader()
-        writer.writerows(rows_out)
-    print(f"consensus: wrote {len(rows_out)} rows to {out} from {len(paths)} source(s)")
-    return len(rows_out)
+    total, kept = write_odds_preserving_frozen(out, rows_out, frozen or set())
+    print(f"consensus: wrote {total} rows to {out} from {len(paths)} source(s) "
+          f"({kept} frozen rows preserved)")
+    return total
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="comma-separated weight per source (default: equal)")
     args = ap.parse_args(argv)
     weights = [float(w) for w in args.weights.split(",")] if args.weights else None
-    build_consensus(args.sources, args.out, weights)
+    # The consumed odds.csv lives in the tournament data dir; when that's where we're writing,
+    # apply the frozen-odds rule (played/kicked-off rows stay verbatim).
+    tdir = Path(args.out).parent
+    frozen = frozen_match_ids(tdir) if (tdir / "fixtures.csv").exists() else None
+    build_consensus(args.sources, args.out, weights, frozen)
     return 0
 
 

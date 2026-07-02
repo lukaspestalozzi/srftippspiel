@@ -108,3 +108,41 @@ def test_fetch_odds_skips_unposted_match(monkeypatch, tmp_path):
     out = tmp_path / "odds_polymarket.csv"
     assert pm.fetch_odds("wc2026", "fifwc", out_path=out) == 0
     assert list(csv.DictReader(out.open())) == []  # header only, no rows
+
+
+def test_fetch_odds_preserves_frozen_rows(monkeypatch, tmp_path):
+    """A played/kicked-off match is neither re-priced nor dropped: its committed row survives
+    verbatim while future fixtures get fresh prices."""
+    fixtures = [
+        {"match_id": "M73", "stage": "R32", "date": "20260628", "home_id": "AAA",
+         "away_id": "BBB", "kickoff_utc": "2026-06-28T19:00:00+00:00", "venue_country": "USA"},
+        {"match_id": "M80", "stage": "R32", "date": "20260701", "home_id": "AAA",
+         "away_id": "BBB", "kickoff_utc": "2026-07-01T19:00:00+00:00", "venue_country": "USA"},
+    ]
+    monkeypatch.setattr(pm, "load_teams", lambda tdir: dict(NAME2ID))
+    monkeypatch.setattr(pm, "load_tippable_fixtures", lambda tdir: fixtures)
+    monkeypatch.setattr(pm, "frozen_match_ids", lambda tdir, now=None: {"M73"})
+
+    asked = []
+
+    def fake_get(url):
+        asked.append(url)
+        if "/teams" in url:
+            return [{"name": "Alpha", "abbreviation": "alp"},
+                    {"name": "Beta", "abbreviation": "bet"}]
+        if url.endswith("/events/slug/fifwc-alp-bet-2026-07-01"):
+            return _event()
+        return None
+
+    monkeypatch.setattr(pm, "_get_json", fake_get)
+    out = tmp_path / "odds_polymarket.csv"
+    out.write_text(
+        "match_id,odds_home,odds_draw,odds_away\nM73,6.55,3.83,1.71\n", encoding="utf-8"
+    )
+
+    assert pm.fetch_odds("wc2026", "fifwc", out_path=out) == 2
+    rows = {r["match_id"]: r for r in csv.DictReader(out.open())}
+    assert rows["M73"] == {"match_id": "M73", "odds_home": "6.55",
+                           "odds_draw": "3.83", "odds_away": "1.71"}  # frozen, verbatim
+    assert float(rows["M80"]["odds_home"]) < float(rows["M80"]["odds_away"])  # freshly priced
+    assert not any("2026-06-2" in u for u in asked)  # the frozen fixture was never queried

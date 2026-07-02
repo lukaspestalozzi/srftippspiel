@@ -21,7 +21,9 @@ ambiguities are covered by trying both team orders and the match date ±1.
 Coverage is partial for not-yet-posted matches (Polymarket creates a match event closer to
 kickoff) — those are reported as "without odds" and skipped, never fabricated; re-run periodically.
 Knockout fixtures are resolved to concrete participants (``fixture_resolve``) once the bracket is
-settled, so they are priced too.
+settled, so they are priced too. **Frozen-odds rule:** played/kicked-off matches are never
+re-priced and their existing committed rows are preserved verbatim (see ``fixture_resolve``) —
+only future fixtures get fresh prices.
 
 Usage (run from the repo root, network required)::
 
@@ -32,7 +34,6 @@ Usage (run from the repo root, network required)::
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import time
 import urllib.error
@@ -41,7 +42,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from tippspiel.data.espn_common import UA, load_teams, norm
-from tippspiel.data.fixture_resolve import load_tippable_fixtures, tournament_dir
+from tippspiel.data.fixture_resolve import (
+    frozen_match_ids,
+    load_tippable_fixtures,
+    tournament_dir,
+    write_odds_preserving_frozen,
+)
 
 GAMMA = "https://gamma-api.polymarket.com"
 
@@ -155,15 +161,18 @@ def _event_for_fixture(league: str, codes: dict[str, str], fixture: dict,
 
 
 def fetch_odds(tournament: str, league: str = "fifwc",
-               out_path: str | Path | None = None) -> int:
+               out_path: str | Path | None = None, *, now: datetime | None = None) -> int:
     """Fetch Polymarket odds for ``tournament``'s tippable fixtures; write ``odds_polymarket.csv``.
 
-    Returns rows written. ``league`` is Polymarket's league slug (``fifwc`` for the men's World Cup).
+    Returns rows written. ``league`` is Polymarket's league slug (``fifwc`` for the men's World
+    Cup). Frozen-odds rule: played/kicked-off matches (as of ``now``, default current UTC time)
+    are not re-priced and their existing rows are preserved verbatim.
     """
     tdir = tournament_dir(tournament)
     name_to_id = load_teams(tdir)
     codes = team_codes(league, name_to_id)
-    fixtures = load_tippable_fixtures(tdir)
+    frozen = frozen_match_ids(tdir, now=now)
+    fixtures = [f for f in load_tippable_fixtures(tdir) if f["match_id"] not in frozen]
 
     rows_out, missing = [], []
     for f in fixtures:
@@ -183,13 +192,10 @@ def fetch_odds(tournament: str, league: str = "fifwc",
         })
 
     out = Path(out_path) if out_path else (tdir / "odds_polymarket.csv")
-    with out.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["match_id", "odds_home", "odds_draw", "odds_away"])
-        writer.writeheader()
-        writer.writerows(rows_out)
-    print(f"{tournament}: wrote {len(rows_out)} rows to {out} "
-          f"({len(missing)} fixtures without odds: {missing[:8]}{'…' if len(missing) > 8 else ''})")
-    return len(rows_out)
+    total, kept = write_odds_preserving_frozen(out, rows_out, frozen)
+    print(f"{tournament}: wrote {total} rows to {out} ({kept} frozen rows preserved, "
+          f"{len(missing)} fixtures without odds: {missing[:8]}{'…' if len(missing) > 8 else ''})")
+    return total
 
 
 def main(argv: list[str] | None = None) -> int:

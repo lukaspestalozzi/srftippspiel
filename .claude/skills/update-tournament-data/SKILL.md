@@ -57,8 +57,10 @@ and no manual snapshot bump. Step 4 then recomputes Elo from that grown corpus.
 
 **Idempotence:** every step is a no-op when nothing's new. Re-running `espn_results_fetch` skips
 matches already in `results.csv`; `fit-ratings` is deterministic and only moves Elo when the corpus
-grew; the odds fetch just rewrites the same snapshot. So a run with no freshly-finished match makes
-no data change and should produce **no commit**.
+grew; the odds fetch re-prices only not-yet-kicked-off fixtures and preserves every played /
+kicked-off match's committed row verbatim (the **frozen-odds rule**, see the Odds section). So a
+run with no freshly-finished match and unmoved markets makes no data change and should produce
+**no commit**.
 
 The report renders a played match with its **pre-match prediction (tip, forecast, data table) plus
 the actual result** — so once `results.csv` is updated, no report change is needed
@@ -165,6 +167,14 @@ Both fetchers are structured-JSON only (no HTML scraping / language-model extrac
 fabricated numbers) and both now price **knockout** fixtures too: they build their fixture list from
 `fixture_resolve.load_tippable_fixtures`, which resolves KO participants from the played results once
 the bracket is settled (group matches + certain KO matchups; still-open slots are skipped).
+
+**Frozen-odds rule — played matches are never updated.** A match that is recorded in `results.csv`
+or has already kicked off is *not* re-priced (an in-play or post-match quote is not a pre-match
+odd), and its existing committed row is preserved **verbatim** by every write — both fetchers and
+the consensus (`fixture_resolve.frozen_match_ids` / `write_odds_preserving_frozen`). So the odds
+files *accumulate* each match's frozen pre-match snapshot over the tournament while only future
+fixtures move; the report/diagnostic keep their market view of played matches. Don't hand-delete
+played rows, and expect `git diff` after a refresh to only ever touch not-yet-kicked-off rows.
 
 ```bash
 D=tippspiel/data/tournaments/wc2026
