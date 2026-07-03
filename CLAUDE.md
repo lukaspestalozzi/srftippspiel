@@ -44,7 +44,10 @@ is the **consensus** of two sources — ESPN sportsbook (`odds_espn.csv`) + Poly
 space by `data/odds_consensus.py` (a fixture present in only one source passes through). Both
 fetchers (`espn_odds_fetch.py`, `polymarket_odds_fetch.py`) build their fixture list from
 `data/fixture_resolve.py`, which resolves **knockout** participants from the played results once the
-bracket is settled — so KO matches get priced, not just group games. Polymarket has no historical
+bracket is settled — so KO matches get priced, not just group games. **Frozen-odds rule:** a match
+that is played or has kicked off is never re-priced, and every odds write (fetchers + consensus)
+preserves its committed row verbatim (`fixture_resolve.frozen_match_ids`) — the odds files
+accumulate frozen pre-match snapshots; only future fixtures move. Polymarket has no historical
 data, so it's live-only (the completed benchmarks stay ESPN/pure-Elo) and is validated via the
 diagnostic's "Market source agreement" (ESPN-vs-Polymarket) check rather than `verify`/`tune`. The
 **format is derived from the data**, not configured: group count/size from `fixtures.csv`,

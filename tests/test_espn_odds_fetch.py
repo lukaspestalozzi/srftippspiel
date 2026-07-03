@@ -1,9 +1,14 @@
 """Tests for the odds fetch tool (tippspiel/data/espn_odds_fetch.py)."""
 
 import csv
+from datetime import datetime, timezone
 
 import tippspiel.data.espn_odds_fetch as eof
 from tippspiel.data.espn_odds_fetch import fetch_odds
+
+# Frozen-odds cutoff pinned before the mocked fixtures' kickoffs, so they stay fetchable
+# no matter when the suite runs.
+NOW = datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc)
 
 
 def _event(event_id, home_name, away_name):
@@ -46,7 +51,7 @@ def test_fetch_odds_finds_event_listed_under_previous_local_date(tmp_path, monke
     monkeypatch.setattr(eof, "_odds_for_event", lambda slug, event_id: (1.95, 3.30, 4.40))
 
     out = tmp_path / "odds_espn.csv"
-    assert fetch_odds("wc2026", "fifa.world", out) == 1
+    assert fetch_odds("wc2026", "fifa.world", out, now=NOW) == 1
     assert "20260702" in requested  # the prior local day was fetched at all
     rows = _read_rows(out)
     assert rows == [{"match_id": "M85", "odds_home": "1.95",
@@ -69,7 +74,7 @@ def test_fetch_odds_orients_prices_by_team_identity(tmp_path, monkeypatch):
     monkeypatch.setattr(eof, "_odds_for_event", lambda slug, event_id: (4.40, 3.30, 1.95))
 
     out = tmp_path / "odds_espn.csv"
-    assert fetch_odds("wc2026", "fifa.world", out) == 1
+    assert fetch_odds("wc2026", "fifa.world", out, now=NOW) == 1
     rows = _read_rows(out)
     assert rows == [{"match_id": "M85", "odds_home": "1.95",
                      "odds_draw": "3.30", "odds_away": "4.40"}]
