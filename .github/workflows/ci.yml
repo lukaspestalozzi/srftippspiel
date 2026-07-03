@@ -155,10 +155,18 @@ jobs:
       # administration:write, which GITHUB_TOKEN cannot be granted.
       - name: Configure Pages
         uses: actions/configure-pages@v5
+      # The artifact name carries the run attempt: artifacts persist across re-runs of a
+      # workflow run, and deploy-pages hard-fails when several artifacts share its name —
+      # with the default fixed "github-pages" name, re-running the publish job after a
+      # transient Pages outage could therefore never succeed (each attempt added another
+      # duplicate). A unique name per attempt keeps the job re-runnable.
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-${{ github.run_attempt }}
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
