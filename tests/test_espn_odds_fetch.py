@@ -11,6 +11,17 @@ from tippspiel.data.espn_odds_fetch import fetch_odds
 NOW = datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc)
 
 
+def _no_frozen(monkeypatch):
+    """Decouple the unit test from live played-state.
+
+    The mocked fixtures reuse real wc2026 ``match_id``s, but ``frozen_match_ids`` reads the
+    committed ``results.csv``: once such a match is actually played it becomes frozen and the
+    fetch skips it, breaking these logic tests. Pin an empty frozen set so they exercise only the
+    date-window / orientation code they're about.
+    """
+    monkeypatch.setattr(eof, "frozen_match_ids", lambda tdir, *, now=None: set())
+
+
 def _event(event_id, home_name, away_name):
     return {
         "id": event_id,
@@ -34,6 +45,7 @@ def test_fetch_odds_finds_event_listed_under_previous_local_date(tmp_path, monke
     or the fixture is never priced (WC2026 M85/M87/M92/M94 were all missing for this reason).
     """
     # Fixture dated 2026-07-03 (UTC), but ESPN lists the event under 2026-07-02 (local).
+    _no_frozen(monkeypatch)
     monkeypatch.setattr(eof, "load_teams",
                         lambda tdir: {"switzerland": "SUI", "algeria": "ALG"})
     monkeypatch.setattr(eof, "load_tippable_fixtures", lambda tdir: [{
@@ -60,6 +72,7 @@ def test_fetch_odds_finds_event_listed_under_previous_local_date(tmp_path, monke
 
 def test_fetch_odds_orients_prices_by_team_identity(tmp_path, monkeypatch):
     """When ESPN's home side is the repo's away side, the home/away prices must swap."""
+    _no_frozen(monkeypatch)
     monkeypatch.setattr(eof, "load_teams",
                         lambda tdir: {"switzerland": "SUI", "algeria": "ALG"})
     monkeypatch.setattr(eof, "load_tippable_fixtures", lambda tdir: [{
