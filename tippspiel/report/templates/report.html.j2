@@ -29,6 +29,17 @@
   h2 { font-size: 1.3rem; border-bottom: 2px solid var(--line); padding-bottom: 6px;
        margin-top: 40px; }
   h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  details.section { margin-top: 40px; }
+  details.section > summary { cursor:pointer; list-style:none; display:flex;
+       align-items:center; gap:10px; border-bottom:2px solid var(--line);
+       padding-bottom:6px; }
+  details.section > summary::-webkit-details-marker { display:none; }
+  details.section > summary::before { content:"\25B8"; color:var(--muted);
+       font-size:1rem; flex:0 0 auto; }
+  details.section[open] > summary::before { content:"\25BE"; }
+  details.section > summary h2 { border:none; margin:0; padding:0; flex:1 1 auto; }
+  details.section > summary:hover h2 { color:var(--accent); }
+  .section-body { margin-top: 8px; }
   .meta { color: var(--muted); font-size: .9rem; }
   .toc { background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px 18px; }
   .toc ul { margin: 6px 0; padding-left: 20px; }
@@ -103,7 +114,9 @@
     </ul>
   </div>
 
-  <h2 id="groups">Group-stage fixtures</h2>
+  <details class="section" id="groups">
+  <summary><h2>Group-stage fixtures</h2></summary>
+  <div class="section-body">
   <p class="meta">All group matches in kickoff order; each is tagged with its group.</p>
   {% for fx in group_fixtures %}
     <div class="card"><details>
@@ -130,9 +143,13 @@
       </div>
     </details></div>
   {% endfor %}
+  </div>
+  </details>
 
   {% if group_standings %}
-  <h2 id="standings">Group standings</h2>
+  <details class="section" id="standings">
+  <summary><h2>Group standings</h2></summary>
+  <div class="section-body">
   <p class="meta">Current tables from the results played so far, ordered by points → goal difference
     → goals scored → head-to-head. A finished group's certain top two are marked
     <span class="through">✓ through</span> — these are the teams that fill the knockout bracket.</p>
@@ -155,15 +172,23 @@
       </table>
     </div></div>
   {% endfor %}
+  </div>
+  </details>
   {% endif %}
 
   {% if advancement %}
-  <h2 id="advancement">Group advancement</h2>
+  <details class="section" id="advancement">
+  <summary><h2>Group advancement</h2></summary>
+  <div class="section-body">
   {% for a in advancement %}{{ a.advancement_chart | safe }}{% endfor %}
+  </div>
+  </details>
   {% endif %}
 
   {% if knockout_fixtures %}
-  <h2 id="knockout">Knockout fixtures</h2>
+  <details class="section" id="knockout">
+  <summary><h2>Knockout fixtures</h2></summary>
+  <div class="section-body">
   {% for fx in knockout_fixtures %}
     <div class="card"><details>
       <summary>
@@ -189,20 +214,32 @@
       </div>
     </details></div>
   {% endfor %}
+  </div>
+  </details>
   {% endif %}
 
   {% if title_odds_chart %}
-  <h2 id="title">Title odds</h2>
+  <details class="section" id="title">
+  <summary><h2>Title odds</h2></summary>
+  <div class="section-body">
   {{ title_odds_chart | safe }}
+  </div>
+  </details>
   {% endif %}
 
   {% if bracket_html %}
-  <h2 id="bracket">Knockout bracket</h2>
+  <details class="section" id="bracket">
+  <summary><h2>Knockout bracket</h2></summary>
+  <div class="section-body">
   {{ bracket_html | safe }}
+  </div>
+  </details>
   {% endif %}
 
   {% if bonus %}
-  <h2 id="bonus">Bonus recommendations</h2>
+  <details class="section" id="bonus">
+  <summary><h2>Bonus recommendations</h2></summary>
+  <div class="section-body">
   {% for b in bonus %}
     <div class="card"><div class="fixture-body">
       <h3 style="margin-top:4px">{{ b.question }} <span class="badge">{{ b.points }} pts</span></h3>
@@ -211,13 +248,34 @@
       {% if b.chart %}{{ b.chart | safe }}{% endif %}
     </div></div>
   {% endfor %}
+  </div>
+  </details>
   {% endif %}
 
-  <footer id="caveats">
-    <h2 style="border:none">Caveats</h2>
-    <p>{{ caveats }}</p>
+  <footer>
+    <details class="section" id="caveats">
+    <summary><h2 style="border:none">Caveats</h2></summary>
+    <div class="section-body"><p>{{ caveats }}</p></div>
+    </details>
   </footer>
 
 </div>
+<script type="text/javascript">
+(function () {
+  function openTarget() {
+    var id = decodeURIComponent((location.hash || "").slice(1));
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    var section = el.closest ? el.closest("details.section") : null;
+    if (el.tagName === "DETAILS") el.open = true;
+    if (section) section.open = true;
+    if (el.scrollIntoView) el.scrollIntoView();
+  }
+  window.addEventListener("hashchange", openTarget);
+  if (document.readyState !== "loading") openTarget();
+  else document.addEventListener("DOMContentLoaded", openTarget);
+})();
+</script>
 </body>
 </html>
