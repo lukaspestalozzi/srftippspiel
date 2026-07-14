@@ -410,20 +410,22 @@ def _elo_history_section(cfg: Config, bundle: TournamentBundle, teams, fixtures)
     block = load_offdef_block(cfg.config_path)
     snapshot = block.get("snapshot_date") or min(m.kickoff for m in fixtures).date().isoformat()
     years = float(cfg.report.elo_history_years)
-    key = (str(cfg.config_path), snapshot, years)
+    start = cfg.report.elo_history_start.strip() or (
+        date.fromisoformat(snapshot) - timedelta(days=round(365.25 * years))
+    ).isoformat()
+    key = (str(cfg.config_path), snapshot, start)
     if key not in _ELO_HISTORY_CACHE:
-        _ELO_HISTORY_CACHE[key] = _build_elo_history(cfg, teams, block, eblock, snapshot, years)
+        _ELO_HISTORY_CACHE[key] = _build_elo_history(cfg, teams, block, eblock, snapshot, start)
     return _ELO_HISTORY_CACHE[key]
 
 
-def _build_elo_history(cfg, teams, offdef_block, elo_block, snapshot, years) -> dict | None:
+def _build_elo_history(cfg, teams, offdef_block, elo_block, snapshot, start) -> dict | None:
     from .data.historical_results_adapter import DEFAULT_CORPUS, corpus_name_for, load_corpus
     from .training.offdef_elo import fit_off_def_history
     from .training.scalar_elo import fit_scalar_elo_history
 
     params, tiers, elo_params, k_tiers = _ratings_fit_params(offdef_block, elo_block)
     corpus_path = offdef_block.get("corpus_file", DEFAULT_CORPUS)
-    start = (date.fromisoformat(snapshot) - timedelta(days=round(365.25 * years))).isoformat()
     matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers, k_tiers=k_tiers)
 
     display = {corpus_name_for(t.name): t.name for t in teams.values()}
@@ -440,9 +442,11 @@ def _build_elo_history(cfg, teams, offdef_block, elo_block, snapshot, years) -> 
     highlight = [display[n] for n in ranked[:8]]
     order = ranked[:8] + sorted(ranked[8:], key=lambda n: display[n])
 
-    elo_series = [(display[n], elo_hist[n]) for n in order]
-    att_series = [(display[n], [(d, a) for d, a, _ in offdef_hist[n]]) for n in order]
-    def_series = [(display[n], [(d, f) for d, _, f in offdef_hist[n]]) for n in order]
+    # Round to teams.csv precision (elo %.0f, att/def %.4f): full float repr would bloat the
+    # embedded JSON payload noticeably at a 26-year window without adding visible detail.
+    elo_series = [(display[n], [(d, round(v, 1)) for d, v in elo_hist[n]]) for n in order]
+    att_series = [(display[n], [(d, round(a, 4)) for d, a, _ in offdef_hist[n]]) for n in order]
+    def_series = [(display[n], [(d, round(f, 4)) for d, _, f in offdef_hist[n]]) for n in order]
     return {
         "window_start": start,
         "snapshot": snapshot,

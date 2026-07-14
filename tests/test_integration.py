@@ -205,6 +205,7 @@ def test_elo_history_section_in_report(tmp_path, small_cfg):
     assert hist is not None
     assert 1 <= len(hist["highlight"]) <= 8         # categorical-palette ceiling
     assert hist["window_start"] < hist["snapshot"]  # ISO strings compare chronologically
+    assert hist["window_start"] == "2000-01-01"     # config.yaml report.elo_history_start
     for key in ("elo_chart", "att_chart", "def_chart"):
         assert 'class="lazy-plot"' in hist[key]
     html = Path(write_report(cfg, result["context"])).read_text()

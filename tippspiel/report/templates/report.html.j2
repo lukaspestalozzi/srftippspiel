@@ -257,8 +257,8 @@
   <details class="section" id="elo-history">
   <summary><h2>Elo ratings over time</h2></summary>
   <div class="section-body">
-  <p class="meta">The model's corpus-fitted ratings replayed over the last years
-    ({{ elo_history.window_start }} → {{ elo_history.snapshot }}, the fit's snapshot cutoff):
+  <p class="meta">The model's corpus-fitted ratings replayed from {{ elo_history.window_start }}
+    to {{ elo_history.snapshot }} (the fit's snapshot cutoff):
     the scalar <b>Elo</b> (who wins) and the offensive/defensive <b>att/def</b> ratings
     (goal volume). Each line ends at the rating the predictor uses today. The strongest
     8 sides by current Elo are shown; click a gray legend entry to add any other team.
