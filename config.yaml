@@ -61,6 +61,7 @@ simulation:
 report:
   output_dir: output/
   display_timezone: Europe/Zurich
+  elo_history_years: 10   # window of the "Elo ratings over time" section (years before snapshot)
 
 strategy:
   # Realistic tips: among scorelines within this many pool-points of the EV optimum, pick the

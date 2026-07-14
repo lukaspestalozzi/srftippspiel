@@ -110,6 +110,7 @@
       {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
       {% if bracket_html %}<li><a href="#bracket">Knockout bracket</a></li>{% endif %}
       {% if bonus %}<li><a href="#bonus">Bonus recommendations</a></li>{% endif %}
+      {% if elo_history %}<li><a href="#elo-history">Elo ratings over time</a></li>{% endif %}
       <li><a href="#caveats">Caveats</a></li>
     </ul>
   </div>
@@ -248,6 +249,24 @@
       {% if b.chart %}{{ b.chart | safe }}{% endif %}
     </div></div>
   {% endfor %}
+  </div>
+  </details>
+  {% endif %}
+
+  {% if elo_history %}
+  <details class="section" id="elo-history">
+  <summary><h2>Elo ratings over time</h2></summary>
+  <div class="section-body">
+  <p class="meta">The model's corpus-fitted ratings replayed over the last years
+    ({{ elo_history.window_start }} → {{ elo_history.snapshot }}, the fit's snapshot cutoff):
+    the scalar <b>Elo</b> (who wins) and the offensive/defensive <b>att/def</b> ratings
+    (goal volume). Each line ends at the rating the predictor uses today. The strongest
+    8 sides by current Elo are shown; click a gray legend entry to add any other team.
+    att/def are log goal-rates relative to the international field (0 = average), shown on
+    the final fit pass and centred at the end-of-window field means.</p>
+  {{ elo_history.elo_chart | safe }}
+  {{ elo_history.att_chart | safe }}
+  {{ elo_history.def_chart | safe }}
   </div>
   </details>
   {% endif %}

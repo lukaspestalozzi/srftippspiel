@@ -36,6 +36,9 @@ class SimulationConfig:
 class ReportConfig:
     output_dir: str
     display_timezone: str
+    # Time window of the report's "Elo ratings over time" section (corpus-fitted tournaments
+    # only): trajectories are plotted from this many years before the fit's snapshot date.
+    elo_history_years: float = 10.0
 
 
 @dataclass(frozen=True)

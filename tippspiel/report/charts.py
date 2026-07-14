@@ -183,6 +183,63 @@ def bracket_progression(rows: list[dict], rounds: list[str] | None = None) -> st
     return _fig_to_div(fig)
 
 
+# Fixed-order categorical palette for the rating-history lines (CVD-validated ordering:
+# worst adjacent-pair ΔE 24.2 under protanopia on the light surface). Slots are assigned to
+# the highlighted teams in rank order and stay with the team across all three history charts,
+# so the same side wears the same colour in the Elo, attack and defence plots.
+_SERIES_COLORS = [
+    "#2a78d6", "#1baf7a", "#eda100", "#008300",
+    "#4a3aa7", "#e34948", "#e87ba4", "#eb6834",
+]
+_CONTEXT_COLOR = "#898781"  # muted gray for the non-highlighted (legend-toggle) teams
+
+
+def rating_history_lines(
+    series: list[tuple[str, list[tuple[str, float]]]],
+    *,
+    title: str,
+    ytitle: str,
+    highlight: list[str],
+    yfmt: str = ".0f",
+) -> str:
+    """Per-team rating trajectories over time (one line per team).
+
+    ``series`` = ``[(team_name, [(iso_date, value), ...]), ...]``. Teams in ``highlight``
+    (max 8 — the categorical-palette ceiling) are drawn in colour and visible by default;
+    every other team starts as a gray legend-only trace the reader can toggle on, so the
+    chart stays readable with a 48-team field."""
+    slot = {name: i for i, name in enumerate(highlight)}
+    fig = go.Figure()
+    for name, points in series:
+        if not points:
+            continue
+        i = slot.get(name)
+        fig.add_trace(
+            go.Scatter(
+                x=[p[0] for p in points],
+                y=[p[1] for p in points],
+                mode="lines",
+                name=name,
+                line=dict(
+                    width=2,
+                    color=_SERIES_COLORS[i % len(_SERIES_COLORS)]
+                    if i is not None
+                    else _CONTEXT_COLOR,
+                ),
+                visible=True if i is not None else "legendonly",
+                hovertemplate=name + " — %{x}: %{y:" + yfmt + "}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        height=440,
+        margin=dict(l=50, r=10, t=40, b=40),
+        title=title,
+        yaxis_title=ytitle,
+        legend=dict(orientation="v"),
+    )
+    return _fig_to_div(fig)
+
+
 def bonus_candidates_bar(question: str, rows: list[tuple[str, float]]) -> str:
     rows = sorted(rows, key=lambda r: r[1])[-8:]
     fig = go.Figure(

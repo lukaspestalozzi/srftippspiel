@@ -189,6 +189,38 @@ def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
     assert "Attack / defence" not in html
 
 
+def test_elo_history_section_in_report(tmp_path, small_cfg):
+    # config.yaml is corpus-fitted (elo.source: corpus), so the report grows an
+    # "Elo ratings over time" section: scalar Elo + att/def trajectories replayed from the
+    # corpus with the same params/snapshot as fit-ratings.
+    cfg = dataclasses.replace(
+        small_cfg, report=dataclasses.replace(small_cfg.report, output_dir=str(tmp_path))
+    )
+    result = run_pipeline(cfg, BUNDLE, simulate=False)
+    hist = result["context"]["elo_history"]
+    assert hist is not None
+    assert 1 <= len(hist["highlight"]) <= 8         # categorical-palette ceiling
+    assert hist["window_start"] < hist["snapshot"]  # ISO strings compare chronologically
+    for key in ("elo_chart", "att_chart", "def_chart"):
+        assert "plotly" in hist[key]
+    html = Path(write_report(cfg, result["context"])).read_text()
+    assert "Elo ratings over time" in html
+
+
+def test_elo_history_skipped_for_external_elo(tmp_path):
+    # An external-Elo tournament (the completed benchmarks, women's Euro) keeps a committed
+    # ratings snapshot the corpus can't reproduce -> no history section.
+    from tippspiel.pipeline import _elo_history_section
+
+    cfg = load_config(REPO / "configs" / "wc2022.yaml")
+    bundle = load_tournament(REPO / "configs" / "wc2022.yaml")
+    from tippspiel.data.file_provider import FileDataProvider
+
+    provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
+    teams = {t.team_id: t for t in provider.get_teams()}
+    assert _elo_history_section(cfg, bundle, teams, provider.get_fixtures()) is None
+
+
 def test_realism_tolerance_raises_both_score_share(small_cfg):
     # A realism tolerance on the EV optimiser lifts the share of tips where BOTH teams score
     # from the ~8% strict-EV rate toward a realistic ~50%.

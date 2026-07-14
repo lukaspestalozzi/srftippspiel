@@ -27,6 +27,7 @@ keeps a ``verify`` backtest leak-free exactly as the off/def fit does.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 
 from .offdef_elo import HistMatch
@@ -57,19 +58,16 @@ def _goal_diff_multiplier(gd: int) -> float:
     return (11 + gd) / 8.0
 
 
-def fit_scalar_elo(
-    matches: list[HistMatch], params: ScalarEloParams | None = None
+def _run_updates(
+    ordered: list[HistMatch],
+    params: ScalarEloParams,
+    on_update: Callable[[HistMatch, dict[str, float]], None] | None = None,
 ) -> dict[str, float]:
-    """Fit a scalar Elo rating for every team appearing in ``matches``.
+    """The single chronological World-Football-Elo pass over already-sorted matches.
 
-    Order-independent: matches are sorted by a content key (date, then teams + goals), so the same
-    corpus + params always yield the same ratings regardless of input order — including matches
-    that share a date (Elo is path-dependent, so date alone is not a stable order). Returns
-    ``team_name -> rating`` (not zero-centred)."""
-    params = params or ScalarEloParams()
-    ordered = sorted(matches, key=lambda m: (m.date, m.home, m.away, m.home_goals, m.away_goals))
+    ``on_update`` (when given) is called after each match's ratings have moved, so a caller
+    can record trajectories without duplicating the update rule."""
     rating: dict[str, float] = defaultdict(lambda: params.start_rating)
-
     for m in ordered:
         home_adv = 0.0 if m.neutral else params.home_advantage
         dr = (rating[m.home] + home_adv) - rating[m.away]
@@ -84,5 +82,53 @@ def fit_scalar_elo(
         delta = params.k_scale * m.k_importance * g * (w - we)
         rating[m.home] += delta
         rating[m.away] -= delta
+        if on_update is not None:
+            on_update(m, rating)
+    return rating
 
-    return dict(rating)
+
+def _ordered(matches: list[HistMatch]) -> list[HistMatch]:
+    """Sort by a content key (date, then teams + goals): Elo is path-dependent, so date alone
+    is not a stable order for matches sharing a date."""
+    return sorted(matches, key=lambda m: (m.date, m.home, m.away, m.home_goals, m.away_goals))
+
+
+def fit_scalar_elo(
+    matches: list[HistMatch], params: ScalarEloParams | None = None
+) -> dict[str, float]:
+    """Fit a scalar Elo rating for every team appearing in ``matches``.
+
+    Order-independent: matches are sorted by a content key (date, then teams + goals), so the same
+    corpus + params always yield the same ratings regardless of input order — including matches
+    that share a date (Elo is path-dependent, so date alone is not a stable order). Returns
+    ``team_name -> rating`` (not zero-centred)."""
+    params = params or ScalarEloParams()
+    return dict(_run_updates(_ordered(matches), params))
+
+
+def fit_scalar_elo_history(
+    matches: list[HistMatch],
+    params: ScalarEloParams | None = None,
+    *,
+    track: Collection[str],
+    start_date: str = "",
+) -> dict[str, list[tuple[str, float]]]:
+    """Per-team rating trajectory from the same pass as :func:`fit_scalar_elo`.
+
+    Returns ``team_name -> [(iso_date, rating_after_match), ...]`` (chronological) for every
+    team in ``track``, restricted to matches on/after ``start_date`` (empty = full history).
+    Because it is the identical single pass, a tracked team's last point equals its
+    :func:`fit_scalar_elo` rating whenever it played inside the window."""
+    params = params or ScalarEloParams()
+    tracked = set(track)
+    history: dict[str, list[tuple[str, float]]] = {t: [] for t in tracked}
+
+    def record(m: HistMatch, rating: dict[str, float]) -> None:
+        if m.date < start_date:
+            return
+        for side in (m.home, m.away):
+            if side in tracked:
+                history[side].append((m.date, rating[side]))
+
+    _run_updates(_ordered(matches), params, record)
+    return history

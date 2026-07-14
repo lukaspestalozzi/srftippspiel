@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from .config import Config, TournamentBundle
+from .config import Config, TournamentBundle, load_elo_block, load_offdef_block
 from .data.base import Odds1X2
 from .data.file_provider import FileDataProvider, read_odds_file
 from .model.types import Match, MatchPrediction, Team, TournamentOutcome
@@ -252,46 +252,16 @@ def write_ratings_snapshot(
 
     from .data.historical_results_adapter import (
         DEFAULT_CORPUS,
-        KTiers,
-        WeightTiers,
         corpus_name_for,
         load_corpus,
         ratings_for_team,
     )
-    from .training.offdef_elo import OffDefParams, OffDefRating, fit_off_def
-    from .training.scalar_elo import ScalarEloParams, fit_scalar_elo
+    from .training.offdef_elo import OffDefRating, fit_off_def
+    from .training.scalar_elo import fit_scalar_elo
 
     block = dict(offdef_block or {})
     eblock = dict(elo_block or {})
-    params = OffDefParams(
-        mu=float(block.get("mu", OffDefParams.mu)),
-        k_att=float(block.get("k_att", OffDefParams.k_att)),
-        k_def=float(block.get("k_def", OffDefParams.k_def)),
-        gamma_home=float(block.get("gamma_home", OffDefParams.gamma_home)),
-        residual_cap=float(block.get("residual_cap", OffDefParams.residual_cap)),
-        epochs=int(block.get("epochs", OffDefParams.epochs)),
-    )
-    elo_params = ScalarEloParams(
-        start_rating=float(eblock.get("start_rating", ScalarEloParams.start_rating)),
-        home_advantage=float(eblock.get("home_advantage", ScalarEloParams.home_advantage)),
-        k_scale=float(eblock.get("k_scale", ScalarEloParams.k_scale)),
-    )
-    w = block.get("weights", {}) or {}
-    tiers = WeightTiers(
-        friendly=float(w.get("friendly", WeightTiers.friendly)),
-        qualifier=float(w.get("qualifier", WeightTiers.qualifier)),
-        continental=float(w.get("continental", WeightTiers.continental)),
-        world_cup=float(w.get("world_cup", WeightTiers.world_cup)),
-        default=float(w.get("default", WeightTiers.default)),
-    )
-    kw = eblock.get("k_tiers", {}) or {}
-    k_tiers = KTiers(
-        friendly=float(kw.get("friendly", KTiers.friendly)),
-        qualifier=float(kw.get("qualifier", KTiers.qualifier)),
-        minor=float(kw.get("minor", KTiers.minor)),
-        continental=float(kw.get("continental", KTiers.continental)),
-        world_cup=float(kw.get("world_cup", KTiers.world_cup)),
-    )
+    params, tiers, elo_params, k_tiers = _ratings_fit_params(block, eblock)
     corpus_path = block.get("corpus_file", DEFAULT_CORPUS)
 
     provider = FileDataProvider(bundle.teams_file, bundle.fixtures_file, bundle.results_file)
@@ -353,6 +323,48 @@ def write_ratings_snapshot(
     }
 
 
+def _ratings_fit_params(offdef_block: dict, elo_block: dict):
+    """Fit parameters + importance tiers from the raw ``offdef:`` / ``elo:`` config blocks.
+
+    Shared by ``fit-ratings`` (which writes the snapshot into teams.csv) and the report's
+    rating-history section (which replays the same fit for the trajectories), so both always
+    derive ratings from identical hyperparameters."""
+    from .data.historical_results_adapter import KTiers, WeightTiers
+    from .training.offdef_elo import OffDefParams
+    from .training.scalar_elo import ScalarEloParams
+
+    params = OffDefParams(
+        mu=float(offdef_block.get("mu", OffDefParams.mu)),
+        k_att=float(offdef_block.get("k_att", OffDefParams.k_att)),
+        k_def=float(offdef_block.get("k_def", OffDefParams.k_def)),
+        gamma_home=float(offdef_block.get("gamma_home", OffDefParams.gamma_home)),
+        residual_cap=float(offdef_block.get("residual_cap", OffDefParams.residual_cap)),
+        epochs=int(offdef_block.get("epochs", OffDefParams.epochs)),
+    )
+    elo_params = ScalarEloParams(
+        start_rating=float(elo_block.get("start_rating", ScalarEloParams.start_rating)),
+        home_advantage=float(elo_block.get("home_advantage", ScalarEloParams.home_advantage)),
+        k_scale=float(elo_block.get("k_scale", ScalarEloParams.k_scale)),
+    )
+    w = offdef_block.get("weights", {}) or {}
+    tiers = WeightTiers(
+        friendly=float(w.get("friendly", WeightTiers.friendly)),
+        qualifier=float(w.get("qualifier", WeightTiers.qualifier)),
+        continental=float(w.get("continental", WeightTiers.continental)),
+        world_cup=float(w.get("world_cup", WeightTiers.world_cup)),
+        default=float(w.get("default", WeightTiers.default)),
+    )
+    kw = elo_block.get("k_tiers", {}) or {}
+    k_tiers = KTiers(
+        friendly=float(kw.get("friendly", KTiers.friendly)),
+        qualifier=float(kw.get("qualifier", KTiers.qualifier)),
+        minor=float(kw.get("minor", KTiers.minor)),
+        continental=float(kw.get("continental", KTiers.continental)),
+        world_cup=float(kw.get("world_cup", KTiers.world_cup)),
+    )
+    return params, tiers, elo_params, k_tiers
+
+
 def _write_teams_csv_with_ratings(teams_file, by_id, elo_by_id, _csv) -> None:
     """Rewrite teams.csv with elo/att_elo/def_elo columns, preserving any other columns."""
     with open(teams_file, newline="", encoding="utf-8") as fh:
@@ -374,6 +386,80 @@ def _write_teams_csv_with_ratings(teams_file, by_id, elo_by_id, _csv) -> None:
         writer = _csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+# Memo for the rating-history section: the corpus fit is deterministic in (config, snapshot),
+# so repeated pipeline runs in one process (the test suite, site assembly) replay it only once.
+_ELO_HISTORY_CACHE: dict[tuple, dict | None] = {}
+
+
+def _elo_history_section(cfg: Config, bundle: TournamentBundle, teams, fixtures) -> dict | None:
+    """Rating trajectories over time for the report's "Elo ratings over time" section.
+
+    Replays the same corpus fits ``fit-ratings`` runs (identical params + snapshot cutoff, via
+    ``_ratings_fit_params``) but records each tournament team's rating after every corpus match
+    inside the display window, then renders one line chart per rating (scalar Elo, att, def).
+    Corpus-fitted tournaments only (``elo.source: corpus``): an external-Elo tournament's
+    committed ratings (frozen eloratings / women's snapshots) cannot be reproduced from the
+    men's corpus, so the section is omitted there. Returns ``None`` when skipped."""
+    if cfg.config_path is None or not cfg.config_path.exists() or not fixtures:
+        return None
+    eblock = load_elo_block(cfg.config_path)
+    if str(eblock.get("source", "external")).strip().lower() != "corpus":
+        return None
+    block = load_offdef_block(cfg.config_path)
+    snapshot = block.get("snapshot_date") or min(m.kickoff for m in fixtures).date().isoformat()
+    years = float(cfg.report.elo_history_years)
+    key = (str(cfg.config_path), snapshot, years)
+    if key not in _ELO_HISTORY_CACHE:
+        _ELO_HISTORY_CACHE[key] = _build_elo_history(cfg, teams, block, eblock, snapshot, years)
+    return _ELO_HISTORY_CACHE[key]
+
+
+def _build_elo_history(cfg, teams, offdef_block, elo_block, snapshot, years) -> dict | None:
+    from .data.historical_results_adapter import DEFAULT_CORPUS, corpus_name_for, load_corpus
+    from .training.offdef_elo import fit_off_def_history
+    from .training.scalar_elo import fit_scalar_elo_history
+
+    params, tiers, elo_params, k_tiers = _ratings_fit_params(offdef_block, elo_block)
+    corpus_path = offdef_block.get("corpus_file", DEFAULT_CORPUS)
+    start = (date.fromisoformat(snapshot) - timedelta(days=round(365.25 * years))).isoformat()
+    matches = load_corpus(before=snapshot, corpus_path=corpus_path, tiers=tiers, k_tiers=k_tiers)
+
+    display = {corpus_name_for(t.name): t.name for t in teams.values()}
+    elo_hist = fit_scalar_elo_history(matches, elo_params, track=display, start_date=start)
+    offdef_hist = fit_off_def_history(matches, params, track=display, start_date=start)
+
+    # Highlight the strongest 8 sides by current (end-of-window) scalar Elo — the categorical
+    # palette ceiling; every other team is a gray legend-toggle trace. Teams absent from the
+    # corpus (no trajectory) drop out naturally.
+    finals = {name: pts[-1][1] for name, pts in elo_hist.items() if pts}
+    if not finals:
+        return None
+    ranked = sorted(finals, key=lambda n: finals[n], reverse=True)
+    highlight = [display[n] for n in ranked[:8]]
+    order = ranked[:8] + sorted(ranked[8:], key=lambda n: display[n])
+
+    elo_series = [(display[n], elo_hist[n]) for n in order]
+    att_series = [(display[n], [(d, a) for d, a, _ in offdef_hist[n]]) for n in order]
+    def_series = [(display[n], [(d, f) for d, _, f in offdef_hist[n]]) for n in order]
+    return {
+        "window_start": start,
+        "snapshot": snapshot,
+        "highlight": highlight,
+        "elo_chart": charts.rating_history_lines(
+            elo_series, title="Scalar Elo (World-Football-Elo, corpus fit)",
+            ytitle="Elo rating", highlight=highlight, yfmt=".0f",
+        ),
+        "att_chart": charts.rating_history_lines(
+            att_series, title="Attack rating (att_elo — higher = scores more)",
+            ytitle="att (log goal-rate vs field)", highlight=highlight, yfmt=".2f",
+        ),
+        "def_chart": charts.rating_history_lines(
+            def_series, title="Defence rating (def_elo — higher = concedes fewer)",
+            ytitle="def (log goal-rate vs field)", highlight=highlight, yfmt=".2f",
+        ),
+    }
 
 
 def _build_report_context(
@@ -411,6 +497,7 @@ def _build_report_context(
     knockout_fixtures = _knockout_sections(
         teams, fixtures, results, predictions, tipset, outcome, market, alpha, realism
     )
+    elo_history = _elo_history_section(cfg, bundle, teams, fixtures)
 
     title_odds_chart = None
     bracket_html = None
@@ -443,6 +530,7 @@ def _build_report_context(
         "title_odds_chart": title_odds_chart,
         "bracket_html": bracket_html,
         "bonus": bonus,
+        "elo_history": elo_history,
         "caveats": CAVEATS,
     }
 
