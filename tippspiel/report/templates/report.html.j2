@@ -294,6 +294,30 @@
   window.addEventListener("hashchange", openTarget);
   if (document.readyState !== "loading") openTarget();
   else document.addEventListener("DOMContentLoaded", openTarget);
+
+  // Lazy chart rendering: figures are embedded as inert JSON (.lazy-plot) and drawn the
+  // first time they become visible — the report carries ~200 figures, all inside closed
+  // <details>, and rendering them eagerly blocks page load for many seconds. Rendering on
+  // reveal also gives Plotly the real container width to size against.
+  var PLOT_CONFIG = { responsive: true, displaylogo: false };
+  function renderPlots(scope) {
+    var nodes = (scope || document).querySelectorAll(".lazy-plot:not([data-rendered])");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      // Skip while any ancestor <details> is closed (offsetParent can't detect this:
+      // Chromium hides closed-details content via content-visibility, not display:none).
+      if (el.closest("details:not([open])")) continue;
+      var spec = JSON.parse(el.firstElementChild.textContent);
+      el.setAttribute("data-rendered", "1");
+      el.removeChild(el.firstElementChild);
+      Plotly.newPlot(el, spec.data, spec.layout, PLOT_CONFIG);
+    }
+  }
+  // toggle doesn't bubble, so listen in the capture phase; covers sections and fixture cards.
+  document.addEventListener("toggle", function (e) {
+    if (e.target.open) renderPlots(e.target);
+  }, true);
+  renderPlots(document);
 })();
 </script>
 </body>

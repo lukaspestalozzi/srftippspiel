@@ -1,6 +1,9 @@
-"""Plotly figure builders (spec §6.7.2). Each returns an HTML <div> fragment via
-to_html(full_html=False, include_plotlyjs=False); plotly.js is inlined once by the
-html_writer. Every chart has hover tooltips showing exact values.
+"""Plotly figure builders (spec §6.7.2). Each returns an HTML <div> fragment carrying the
+figure as an **inert JSON payload**; the report template's lazy-render runtime calls
+Plotly.newPlot on it the first time its section is revealed. Rendering eagerly instead
+(plotly's to_html script tags) blocks page load for ~10s+ — the report embeds ~200 figures,
+all inside closed <details>. plotly.js is inlined once by the html_writer. Every chart has
+hover tooltips showing exact values.
 """
 
 from __future__ import annotations
@@ -9,11 +12,19 @@ import plotly.graph_objects as go
 
 from ..model.scoreline import ScorelineDistribution
 
-_DIV = dict(full_html=False, include_plotlyjs=False)
-
 
 def _fig_to_div(fig: go.Figure) -> str:
-    return fig.to_html(**_DIV)
+    """Wrap a figure as ``<div class="lazy-plot">`` + JSON for the template's lazy renderer.
+
+    ``min-height`` reserves the figure's final height so revealing a section doesn't shift
+    the layout when the charts pop in. ``</`` is escaped so a payload can never terminate
+    its own <script> element."""
+    height = int(fig.layout.height or 450)
+    payload = fig.to_json().replace("</", "<\\/")
+    return (
+        f'<div class="lazy-plot" style="min-height:{height}px">'
+        f'<script type="application/json">{payload}</script></div>'
+    )
 
 
 def ldw_bar(dist: ScorelineDistribution, home: str, away: str) -> str:

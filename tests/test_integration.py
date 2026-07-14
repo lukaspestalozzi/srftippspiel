@@ -43,7 +43,11 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     html = Path(path).read_text()
 
     assert html.strip().endswith("</html>")
-    assert "Plotly.newPlot" in html  # figures rendered
+    # Figures ship as inert JSON payloads + the lazy-render runtime (eager rendering of the
+    # ~200 embedded figures blocks page load for ~10s); nothing calls newPlot at parse time.
+    assert "Plotly.newPlot" in html            # the runtime is present...
+    assert html.count('class="lazy-plot"') > 100  # ...and the figures are lazy payloads
+    assert '<script type="text/javascript">Plotly.newPlot' not in html
     # Self-contained: no external script/style/image loads.
     assert not re.search(r'<(script|link|img)[^>]*(src|href)=[\"\']https?://', html)
     # Champion recommendation present.
@@ -202,7 +206,7 @@ def test_elo_history_section_in_report(tmp_path, small_cfg):
     assert 1 <= len(hist["highlight"]) <= 8         # categorical-palette ceiling
     assert hist["window_start"] < hist["snapshot"]  # ISO strings compare chronologically
     for key in ("elo_chart", "att_chart", "def_chart"):
-        assert "plotly" in hist[key]
+        assert 'class="lazy-plot"' in hist[key]
     html = Path(write_report(cfg, result["context"])).read_text()
     assert "Elo ratings over time" in html
 
