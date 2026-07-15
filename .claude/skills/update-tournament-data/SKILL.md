@@ -90,10 +90,17 @@ This skill is run repeatedly against the same branch, in a fresh container each 
   match the final branch state rather than leaving a stale prior-run description.
 - **Checking CI after pushing.** Don't enumerate full workflow-run/job payloads. (`pull_request_read
   get_status` is **not useful** — it returned `total_count: 0` while Actions CI was running.) Instead:
-  1. `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>` with `per_page: 1`.
-  2. `actions_list list_workflow_jobs` for that run id with `workflow_jobs_filter: {filter: "latest"}`
-     — a compact per-job `conclusion` list, no per-step logs.
-  Only fetch a job's logs if it reports `failure`.
+  1. `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>` with `per_page: 1` —
+     read the run's top-level `status`/`conclusion`.
+  2. Only if the run **failed**, `actions_list list_workflow_jobs` for that run id with
+     `workflow_jobs_filter: {filter: "latest"}` to find which job, then fetch that job's logs.
+     A green run needs no jobs call.
+  **Payload overflow:** this repo fans out to ~16 parallel CI jobs, so both calls can exceed the
+  tool's token limit even with `per_page: 1`. When that happens the tool saves the JSON to a file
+  and prints its path — don't try to Read the whole thing; extract just the fields you need, e.g.
+  `python3 -c "import json; d=json.load(open('<path>')); r=d['workflow_runs'][0]; print(r['status'], r['conclusion'])"`
+  (or over `d['jobs']['jobs']`: `[(j['name'], j['conclusion']) for j in ...]`). Note run objects use
+  `conclusion`/`status`; a `KeyError` there usually means you sliced the wrong list.
 
 ## Results — `espn_results_fetch`
 
