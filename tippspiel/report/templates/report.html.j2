@@ -110,6 +110,7 @@
       {% if title_odds_chart %}<li><a href="#title">Title odds</a></li>{% endif %}
       {% if bracket_html %}<li><a href="#bracket">Knockout bracket</a></li>{% endif %}
       {% if bonus %}<li><a href="#bonus">Bonus recommendations</a></li>{% endif %}
+      {% if elo_history %}<li><a href="#elo-history">Elo ratings over time</a></li>{% endif %}
       <li><a href="#caveats">Caveats</a></li>
     </ul>
   </div>
@@ -252,6 +253,24 @@
   </details>
   {% endif %}
 
+  {% if elo_history %}
+  <details class="section" id="elo-history">
+  <summary><h2>Elo ratings over time</h2></summary>
+  <div class="section-body">
+  <p class="meta">The model's corpus-fitted ratings replayed from {{ elo_history.window_start }}
+    to {{ elo_history.snapshot }} (the fit's snapshot cutoff):
+    the scalar <b>Elo</b> (who wins) and the offensive/defensive <b>att/def</b> ratings
+    (goal volume). Each line ends at the rating the predictor uses today. The strongest
+    8 sides by current Elo are shown; click a gray legend entry to add any other team.
+    att/def are log goal-rates relative to the international field (0 = average), shown on
+    the final fit pass and centred at the end-of-window field means.</p>
+  {{ elo_history.elo_chart | safe }}
+  {{ elo_history.att_chart | safe }}
+  {{ elo_history.def_chart | safe }}
+  </div>
+  </details>
+  {% endif %}
+
   <footer>
     <details class="section" id="caveats">
     <summary><h2 style="border:none">Caveats</h2></summary>
@@ -275,6 +294,30 @@
   window.addEventListener("hashchange", openTarget);
   if (document.readyState !== "loading") openTarget();
   else document.addEventListener("DOMContentLoaded", openTarget);
+
+  // Lazy chart rendering: figures are embedded as inert JSON (.lazy-plot) and drawn the
+  // first time they become visible — the report carries ~200 figures, all inside closed
+  // <details>, and rendering them eagerly blocks page load for many seconds. Rendering on
+  // reveal also gives Plotly the real container width to size against.
+  var PLOT_CONFIG = { responsive: true, displaylogo: false };
+  function renderPlots(scope) {
+    var nodes = (scope || document).querySelectorAll(".lazy-plot:not([data-rendered])");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      // Skip while any ancestor <details> is closed (offsetParent can't detect this:
+      // Chromium hides closed-details content via content-visibility, not display:none).
+      if (el.closest("details:not([open])")) continue;
+      var spec = JSON.parse(el.firstElementChild.textContent);
+      el.setAttribute("data-rendered", "1");
+      el.removeChild(el.firstElementChild);
+      Plotly.newPlot(el, spec.data, spec.layout, PLOT_CONFIG);
+    }
+  }
+  // toggle doesn't bubble, so listen in the capture phase; covers sections and fixture cards.
+  document.addEventListener("toggle", function (e) {
+    if (e.target.open) renderPlots(e.target);
+  }, true);
+  renderPlots(document);
 })();
 </script>
 </body>

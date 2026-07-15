@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 
 
@@ -79,22 +80,23 @@ class OffDefRating:
     def_: float
 
 
-def fit_off_def(
-    matches: list[HistMatch], params: OffDefParams | None = None
-) -> dict[str, OffDefRating]:
-    """Fit attack/defence ratings for every team appearing in ``matches``.
+def _run_epochs(
+    ordered: list[HistMatch],
+    params: OffDefParams,
+    on_update: Callable[[HistMatch, dict[str, float], dict[str, float]], None] | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """The epoch loop over already-sorted matches; returns the raw (uncentred) att/def dicts.
 
-    Deterministic: matches are sorted by date (stable), so the same corpus + params always
-    yield the same ratings. Returns ``team_name -> OffDefRating`` (zero-centred).
-    """
-    params = params or OffDefParams()
-    ordered = sorted(matches, key=lambda m: m.date)
+    ``on_update`` (when given) is called after each match of the **final** epoch — the pass
+    whose ratings the fit exports — so a caller can record trajectories without duplicating
+    the update rule."""
     att: dict[str, float] = defaultdict(float)
     deff: dict[str, float] = defaultdict(float)
     half = params.mu / 2.0
     cap = params.residual_cap
 
-    for _epoch in range(params.epochs):
+    for epoch in range(params.epochs):
+        final_epoch = epoch == params.epochs - 1
         for m in ordered:
             home_adv = 0.0 if m.neutral else params.gamma_home
             lam_h = half * math.exp(att[m.home] - deff[m.away] + home_adv)
@@ -107,8 +109,61 @@ def fit_off_def(
             deff[m.away] -= wkd * res_h
             att[m.away] += wkh * res_a
             deff[m.home] -= wkd * res_a
+            if final_epoch and on_update is not None:
+                on_update(m, att, deff)
 
+    return att, deff
+
+
+def fit_off_def(
+    matches: list[HistMatch], params: OffDefParams | None = None
+) -> dict[str, OffDefRating]:
+    """Fit attack/defence ratings for every team appearing in ``matches``.
+
+    Deterministic: matches are sorted by date (stable), so the same corpus + params always
+    yield the same ratings. Returns ``team_name -> OffDefRating`` (zero-centred).
+    """
+    params = params or OffDefParams()
+    att, deff = _run_epochs(sorted(matches, key=lambda m: m.date), params)
     return _centre(att, deff)
+
+
+def fit_off_def_history(
+    matches: list[HistMatch],
+    params: OffDefParams | None = None,
+    *,
+    track: Collection[str],
+    start_date: str = "",
+) -> dict[str, list[tuple[str, float, float]]]:
+    """Per-team att/def trajectory from the same fit as :func:`fit_off_def`.
+
+    Returns ``team_name -> [(iso_date, att, def), ...]`` (chronological) for every team in
+    ``track``, restricted to matches on/after ``start_date`` (empty = full history). Points are
+    recorded during the **final** epoch and shifted by the final field means (the same centring
+    :func:`fit_off_def` applies), so a tracked team's last point equals its exported rating
+    whenever it played inside the window. Earlier points share that single shift — the
+    trajectory shows how the rating moved, not a per-date re-centring of the whole field."""
+    params = params or OffDefParams()
+    tracked = set(track)
+    raw: dict[str, list[tuple[str, float, float]]] = {t: [] for t in tracked}
+
+    def record(m: HistMatch, att: dict[str, float], deff: dict[str, float]) -> None:
+        if m.date < start_date:
+            return
+        for side in (m.home, m.away):
+            if side in tracked:
+                raw[side].append((m.date, att[side], deff[side]))
+
+    att, deff = _run_epochs(sorted(matches, key=lambda m: m.date), params, record)
+    teams = set(att) | set(deff)
+    if not teams:
+        return raw
+    mean_att = sum(att.values()) / len(teams)
+    mean_def = sum(deff.values()) / len(teams)
+    return {
+        t: [(d, a - mean_att, f - mean_def) for d, a, f in points]
+        for t, points in raw.items()
+    }
 
 
 def _clip(x: float, cap: float) -> float:

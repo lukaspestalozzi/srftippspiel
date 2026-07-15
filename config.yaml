@@ -61,6 +61,8 @@ simulation:
 report:
   output_dir: output/
   display_timezone: Europe/Zurich
+  elo_history_start: "2000-01-01"  # window start of the "Elo ratings over time" section
+  elo_history_years: 10   # fallback window (years before snapshot) when elo_history_start is unset
 
 strategy:
   # Realistic tips: among scorelines within this many pool-points of the EV optimum, pick the

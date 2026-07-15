@@ -17,6 +17,7 @@ from tippspiel.training.offdef_elo import (
     OffDefParams,
     OffDefRating,
     fit_off_def,
+    fit_off_def_history,
 )
 
 
@@ -79,6 +80,28 @@ def test_importance_weight_amplifies_update():
 
 def test_no_matches_yields_empty():
     assert fit_off_def([]) == {}
+
+
+def test_history_endpoint_matches_fit():
+    # Recorded on the final epoch + shifted by the final field means, so a tracked team's last
+    # point equals its exported (centred) rating.
+    matches = _round_robin_with_dominant()
+    fitted = fit_off_def(matches)
+    hist = fit_off_def_history(matches, track={"HI", "O1"})
+    for team in ("HI", "O1"):
+        d, att, def_ = hist[team][-1]
+        assert att == pytest.approx(fitted[team].att)
+        assert def_ == pytest.approx(fitted[team].def_)
+
+
+def test_history_window_and_tracking():
+    matches = _round_robin_with_dominant()
+    hist = fit_off_def_history(matches, track={"HI"}, start_date="2020-02-01")
+    assert set(hist) == {"HI"}
+    # HI's four matches are all in January -> nothing recorded inside the window.
+    assert hist["HI"] == []
+    dates = [d for d, _, _ in fit_off_def_history(matches, track={"O1"})["O1"]]
+    assert dates == sorted(dates) and len(dates) == 4  # O1 plays HI once + 3 peer draws
 
 
 def test_residual_cap_limits_a_single_blowout():

@@ -181,7 +181,10 @@ picks the lowest-total scoreline capturing the dominant tendency. This shutout b
   `ev_components()` is the reusable EV breakdown; `best_tip()` takes a `realism_tolerance`) and
   `bonus.py` (bonus questions).
 - `tippspiel/simulation/` — vectorised NumPy `TournamentSimulator` + standings/thirds/bracket.
-- `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report),
+- `tippspiel/report/` — `html_writer.py`/`charts.py`/templates (pool report; for corpus-fitted
+  tournaments — `elo.source: corpus` — it grows an "Elo ratings over time" section that replays
+  the scalar + att/def fits from the corpus and plots each team's trajectory over the last
+  `report.elo_history_years`, endpoints matching the committed `teams.csv` ratings),
   `diagnostics.py` (my report), and `site.py` — the static-site assembler behind CI's
   `publish` job (GitHub Pages, <https://lukaspestalozzi.github.io/srftippspiel/>): landing
   page + live `run` report + per-benchmark `predict` report & `verify` backtest. Deploys on

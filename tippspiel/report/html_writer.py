@@ -2,7 +2,8 @@
 
 All CSS, JS and the Plotly library are inlined so the report opens by double-clicking,
 works fully offline, and can be shared as a single attachment. plotly.js is included
-exactly once; each figure is rendered with include_plotlyjs=False.
+exactly once; each figure is embedded as an inert JSON payload that the template's
+lazy-render runtime draws on first reveal (see charts._fig_to_div).
 """
 
 from __future__ import annotations

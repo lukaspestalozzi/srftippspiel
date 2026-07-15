@@ -8,6 +8,7 @@ from tippspiel.training.scalar_elo import (
     ScalarEloParams,
     _goal_diff_multiplier,
     fit_scalar_elo,
+    fit_scalar_elo_history,
 )
 
 
@@ -78,3 +79,36 @@ def test_higher_k_moves_more():
     big = fit_scalar_elo([_m("A", "B", 1, 0, k=60.0)])
     small = fit_scalar_elo([_m("A", "B", 1, 0, k=20.0)])
     assert big["A"] - 1500.0 > small["A"] - 1500.0
+
+
+# --------------------------------------------------------------------------- history
+def _history_corpus():
+    return [
+        _m("A", "B", 2, 0, date="2020-01-01"),
+        _m("A", "C", 1, 1, date="2020-06-01"),
+        _m("B", "C", 0, 3, date="2021-01-01"),
+        _m("A", "B", 0, 1, date="2021-06-01"),
+    ]
+
+
+def test_history_endpoint_matches_fit():
+    # Same single pass: a tracked team's last point is exactly its fitted rating.
+    matches = _history_corpus()
+    fitted = fit_scalar_elo(matches)
+    hist = fit_scalar_elo_history(matches, track={"A", "C"})
+    assert hist["A"][-1][1] == fitted["A"]
+    assert hist["C"][-1][1] == fitted["C"]
+
+
+def test_history_is_chronological_one_point_per_match():
+    hist = fit_scalar_elo_history(_history_corpus(), track={"A"})
+    dates = [d for d, _ in hist["A"]]
+    assert dates == sorted(dates) == ["2020-01-01", "2020-06-01", "2021-06-01"]  # A played 3
+
+
+def test_history_tracks_only_requested_teams_and_window():
+    hist = fit_scalar_elo_history(_history_corpus(), track={"B"}, start_date="2021-01-01")
+    assert set(hist) == {"B"}
+    # Pre-window matches still move the rating but are not recorded.
+    assert [d for d, _ in hist["B"]] == ["2021-01-01", "2021-06-01"]
+    assert hist["B"][-1][1] == fit_scalar_elo(_history_corpus())["B"]
