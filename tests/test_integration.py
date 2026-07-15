@@ -61,8 +61,9 @@ def test_full_pipeline_self_contained_report(tmp_path, small_cfg):
     ko = {b["match_id"]: b for b in result["context"]["knockout_fixtures"]}
     assert ko["M84"]["home"] == "Spain" and ko["M84"]["away"] == "Austria"
     assert ko["M75"]["away"] == "Morocco"
-    # A later-round fixture filled from not-yet-played matches still shows the slot placeholder.
-    assert ko["M104"]["home"] == "Winner of M101" and ko["M104"]["away"] == "Winner of M102"
+    # A later-round fixture with one leg resolved (M101 played, Spain won) shows that side's
+    # concrete team while the still-unplayed leg (M102) keeps its slot placeholder.
+    assert ko["M104"]["home"] == "Spain" and ko["M104"]["away"] == "Winner of M102"
     ko_html = html[html.find('id="knockout"'):html.find('id="title"')]
     assert "None" not in ko_html
 
