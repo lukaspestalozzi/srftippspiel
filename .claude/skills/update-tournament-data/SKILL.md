@@ -70,10 +70,16 @@ the actual result** — so once `results.csv` is updated, no report change is ne
 
 This skill is run repeatedly against the same branch, in a fresh container each time.
 
-- **Branch & base.** **The task prompt's branch instruction always wins.** Default (no branch in the
-  prompt): work on `claude/update-data`; if `origin/claude/update-data` exists, **start from it**
-  (`git reset --hard origin/claude/update-data`) and layer on top — a prior run may have a *partial*
-  commit. Fall back to `origin/main` only if the branch doesn't exist.
+- **Branch & base.** **The task prompt's branch instruction always wins** — read it first and follow
+  it literally; it overrides every default below, including whether a PR is opened.
+  - *Prompt says commit straight to `main` (no branch, no PR):* `git checkout main && git reset --hard
+    origin/main`, do the work, commit, and push to `main`. Do **not** create a feature branch or a PR
+    in this mode; the "draft PR" step under the commit gate does not apply.
+  - *Prompt names a feature branch:* use exactly that branch (start from `origin/<branch>` if it
+    exists, else `origin/main`), and follow the commit gate's draft-PR step.
+  - *No branch in the prompt (default):* work on `claude/update-data`; if `origin/claude/update-data`
+    exists, **start from it** (`git reset --hard origin/claude/update-data`) and layer on top — a prior
+    run may have a *partial* commit. Fall back to `origin/main` only if the branch doesn't exist.
 - **Environment setup.** `pip install -e ".[dev]"` (PyYAML, needed by `config.py`, is included). Run
   tests with **`python -m pytest -q`** — a bare `pytest` on PATH may be an isolated uv-tool install
   without the project's deps and fails collection with `ModuleNotFoundError: No module named 'yaml'`.
@@ -86,21 +92,32 @@ This skill is run repeatedly against the same branch, in a fresh container each 
   commit, and let the next run pick it up.** Never fabricate a value to work around a blocked feed.
 - **Commit gate.** Commit only if something actually changed (a result was recorded, odds changed, or
   Elo changed — check `git status`). If nothing has been played and odds+Elo are unchanged, make no
-  commit. After pushing, open a **draft** PR if none exists; if a PR exists, **update its body** to
-  match the final branch state rather than leaving a stale prior-run description.
+  commit. After pushing to a **feature branch**, open a **draft** PR if none exists; if a PR exists,
+  **update its body** to match the final branch state rather than leaving a stale prior-run
+  description. In **commit-straight-to-`main`** mode (see Branch & base) there is no PR — skip this
+  step entirely.
 - **Checking CI after pushing.** Don't enumerate full workflow-run/job payloads. (`pull_request_read
   get_status` is **not useful** — it returned `total_count: 0` while Actions CI was running.) Instead:
-  1. `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>` with `per_page: 1` —
-     read the run's top-level `status`/`conclusion`.
-  2. Only if the run **failed**, `actions_list list_workflow_jobs` for that run id with
+  1. **Find the run id once.** `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>`.
+     This call is only to learn the id of the run whose `head_sha` matches your pushed commit — its
+     per-run objects are stripped down (they carry `status` but **not `conclusion`**, and `per_page`
+     may be ignored), so don't try to read the result from here.
+  2. **Poll that run by id** with `actions_get get_workflow_run <run_id>` — a single compact object
+     that **does** carry both `status` and `conclusion`. Re-fetch this same call until `status` is
+     `completed`, then read `conclusion` (`success` / `failure`).
+  3. Only if the run **failed**, `actions_list list_workflow_jobs` for that run id with
      `workflow_jobs_filter: {filter: "latest"}` to find which job, then fetch that job's logs.
      A green run needs no jobs call.
-  **Payload overflow:** this repo fans out to ~16 parallel CI jobs, so both calls can exceed the
-  tool's token limit even with `per_page: 1`. When that happens the tool saves the JSON to a file
-  and prints its path — don't try to Read the whole thing; extract just the fields you need, e.g.
-  `python3 -c "import json; d=json.load(open('<path>')); r=d['workflow_runs'][0]; print(r['status'], r['conclusion'])"`
-  (or over `d['jobs']['jobs']`: `[(j['name'], j['conclusion']) for j in ...]`). Note run objects use
-  `conclusion`/`status`; a `KeyError` there usually means you sliced the wrong list.
+  **Waiting for completion.** CI takes a few minutes and this environment can't poll GitHub from bash
+  (no token — the MCP tool holds the auth), and foreground `sleep` is blocked. So don't busy-loop:
+  arm a one-shot timer with the **Monitor** tool (`command: "sleep 150; echo recheck"`, `timeout_ms`
+  a bit above the sleep) and, when it fires, re-run the step-2 `actions_get`. Repeat the timer if
+  still `in_progress`. Never spin on `actions_get` back-to-back.
+  **Payload overflow:** this repo fans out to ~16 parallel CI jobs, so the step-1 `list` call can
+  exceed the tool's token limit and save its JSON to a file instead, printing the path. Don't Read the
+  whole file — extract just the run id for your sha, e.g.
+  `python3 -c "import json; d=json.load(open('<path>')); print([(r['id'], r['status']) for r in d['workflow_runs'] if r['head_sha'].startswith('<sha7>')])"`.
+  (The step-2 `get_workflow_run` object is small and never overflows.)
 
 ## Results — `espn_results_fetch`
 
