@@ -23,6 +23,21 @@ a **thin** reference (`match_id,date,winner_team_id`) resolved against it at loa
 
 Run from the repo root. For wc2026 the ESPN slug is `fifa.world`.
 
+**Step 0 — is the tournament already complete?** If every fixture has a recorded result, the
+whole pipeline below is a guaranteed no-op (no result to record, odds all frozen, Elo unmoved),
+so short-circuit instead of spending the four fetches:
+
+```bash
+D=tippspiel/data/tournaments/wc2026
+f=$(tail -n +2 $D/fixtures.csv | wc -l); r=$(tail -n +2 $D/results.csv | wc -l)
+echo "fixtures=$f results=$r"          # equal => tournament complete
+```
+
+When `results == fixtures`, the tournament is **over**: make no changes, no commit, and note it.
+A live tournament that has ended will never again produce work — so recommend the operator
+**retire this recurring routine or repoint it at the next live tournament's config**; left
+running it just wakes a fresh container each fire to re-confirm "complete, nothing to do".
+
 ```bash
 # 1. RESULTS — dry-run first, then review/dual-source the printed scores, then --write.
 python -m tippspiel.data.espn_results_fetch wc2026 fifa.world                      # dry-run (prints plan)
@@ -97,14 +112,18 @@ This skill is run repeatedly against the same branch, in a fresh container each 
   description. In **commit-straight-to-`main`** mode (see Branch & base) there is no PR — skip this
   step entirely.
 - **Checking CI after pushing.** Don't enumerate full workflow-run/job payloads. (`pull_request_read
-  get_status` is **not useful** — it returned `total_count: 0` while Actions CI was running.) Instead:
-  1. **Find the run id once.** `actions_list list_workflow_runs` filtered to `branch: <pushed-branch>`.
-     This call is only to learn the id of the run whose `head_sha` matches your pushed commit — its
-     per-run objects are stripped down (they carry `status` but **not `conclusion`**, and `per_page`
-     may be ignored), so don't try to read the result from here.
-  2. **Poll that run by id** with `actions_get get_workflow_run <run_id>` — a single compact object
-     that **does** carry both `status` and `conclusion`. Re-fetch this same call until `status` is
-     `completed`, then read `conclusion` (`success` / `failure`).
+  get_status` is **not useful** — it returned `total_count: 0` while Actions CI was running.)
+  **Exact tool params (both errored when omitted):** `actions_list` requires `method` (e.g.
+  `method: "list_workflow_runs"`); `actions_get` requires `method: "get_workflow_run"` **and**
+  `resource_id: <run_id>` — the id field is named `resource_id`, *not* `run_id`. Then:
+  1. **Find the run id once.** `actions_list` `method: "list_workflow_runs"` filtered to
+     `branch: <pushed-branch>`. This call is only to learn the id of the run whose `head_sha`
+     matches your pushed commit — its per-run objects are stripped down (they carry `status` but
+     **not `conclusion`**, and `per_page` may be ignored), so don't try to read the result from here.
+  2. **Poll that run by id** with `actions_get` `method: "get_workflow_run"`, `resource_id: <run_id>`
+     (add `minimal_output: true` to keep it compact) — a single object that **does** carry both
+     `status` and `conclusion`. Re-fetch this same call until `status` is `completed`, then read
+     `conclusion` (`success` / `failure`).
   3. Only if the run **failed**, `actions_list list_workflow_jobs` for that run id with
      `workflow_jobs_filter: {filter: "latest"}` to find which job, then fetch that job's logs.
      A green run needs no jobs call.

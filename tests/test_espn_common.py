@@ -1,5 +1,6 @@
 """Tests for the ESPN fetch tools' shared helpers (tippspiel/data/espn_common.py)."""
 
+import csv
 from pathlib import Path
 
 import tippspiel
@@ -93,9 +94,18 @@ def test_load_concrete_fixtures_skips_structural_refs():
 
 
 def test_load_played_match_ids_wc2026():
+    # Structural invariant, independent of how far the tournament has progressed:
+    # the played set is exactly the match_ids in results.csv, and every one of them
+    # is a real fixture. (Don't hardcode which matches are played — that assumption
+    # goes stale as matchdays are recorded, culminating in the final.)
+    with (WC2026 / "results.csv").open(newline="", encoding="utf-8") as fh:
+        expected = {row["match_id"] for row in csv.DictReader(fh)}
+
     played = load_played_match_ids(WC2026)
-    assert "G_A_1" in played
-    assert "G_A_2" in played
-    assert "M104" in played  # the final — the tournament is complete
+    assert played == expected
     # A match id that isn't in results.csv isn't reported as played.
     assert "NOPE_999" not in played
+    # Every played id is a declared fixture (results.csv never references a phantom match).
+    fixture_ids = {row.split(",", 1)[0] for row in
+                   (WC2026 / "fixtures.csv").read_text(encoding="utf-8").splitlines()[1:]}
+    assert played <= fixture_ids
