@@ -96,5 +96,6 @@ def test_load_played_match_ids_wc2026():
     played = load_played_match_ids(WC2026)
     assert "G_A_1" in played
     assert "G_A_2" in played
-    # An unplayed (not-yet-kicked-off) fixture isn't recorded as played.
-    assert "M104" not in played  # the final — far from being played
+    assert "M104" in played  # the final — the tournament is complete
+    # A match id that isn't in results.csv isn't reported as played.
+    assert "NOPE_999" not in played
