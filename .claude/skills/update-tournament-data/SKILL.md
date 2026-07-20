@@ -19,6 +19,46 @@ scorelines: scores live in `tippspiel/data/historical/international_results.csv`
 a **thin** reference (`match_id,date,winner_team_id`) resolved against it at load time, and
 `fit-ratings` derives every Elo column from it. Two tools do the fetching; you mostly just run them.
 
+## Running this as a recurring routine
+
+During a live tournament this skill is meant to run **unattended on a schedule** — one wake per
+matchday — via a **Claude Code on the web scheduled task** (a "routine"). It commits straight to
+`main` and just needs CI to stay green; nobody watches the run, so a heads-up notification is the
+only channel back to the operator (the routine fires `PushNotification` when something noteworthy
+happens, and stays silent on a clean no-op).
+
+**To set one up** (Claude Code on the web → the repo's environment → *Schedule a task* / routines):
+
+- **Cadence:** once a day while the tournament is live (matches finish daily; the run is a clean
+  no-op on days nothing new happened, so a daily tick is safe and cheap). Pick a time a few hours
+  after the day's last kickoff so finished-match scores and settled markets are posted.
+- **Environment / network:** the routine needs the env's setup to run `pip install -e ".[dev]"`
+  and outbound HTTPS to the feed hosts — allowlist **`site.api.espn.com`**,
+  **`sports.core.api.espn.com`** and **`gamma-api.polymarket.com`**. A blocked host degrades
+  cleanly (that sub-step is skipped and picked up next run), so egress restrictions don't break the
+  routine, they just delay a source.
+- **The prompt** (verbatim template — swap the tournament/slug for a different event, keep the rest):
+
+  > Run the update-tournament-data skill for the live wc2026 tournament (ESPN slug fifa.world) to
+  > refresh results, odds and Elo. Follow the skill for every data step, validation, and the commit
+  > gate. Branch (overrides the skill's default): work directly on main — the current branch may or
+  > may not be main, checkout main first; do not branch off or replace existing work. No PR is
+  > needed, but CI must be green afterward. Do the env setup the skill specifies first.
+  >
+  > This is a repeated prompt. Suggest improvements of this prompt or the entire process for the
+  > next run. Only suggest actionable improvements.
+
+  The "commit to `main`, no PR" instruction is what puts the run in the skill's commit-straight-to-
+  `main` mode (see **Workflow & environment → Branch & base**); the "suggest improvements" line asks
+  each run to hand the operator a short retro (that's how this section, the Step-0 fast-path, and the
+  CI-param notes were added).
+
+- **Winding it down.** A routine only makes sense while a tournament is live. Once it's **complete**
+  (Step 0 below: `results == fixtures`), every future run is a guaranteed no-op — **retire the
+  routine, or repoint its prompt at the next live tournament's config** (`--config configs/<name>.yaml`
+  + the matching ESPN slug). The schedule lives in the web UI, so this is an operator action; the run
+  itself can only flag it.
+
 ## The pipeline (one matchday)
 
 Run from the repo root. For wc2026 the ESPN slug is `fifa.world`.
