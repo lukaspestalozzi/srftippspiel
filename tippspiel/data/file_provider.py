@@ -104,7 +104,7 @@ class FileDataProvider(DataProvider):
             for row in csv.DictReader(fh):
                 if not row.get("team_id"):
                     continue
-                # att_elo/def_elo are optional (added by `tippspiel fit-offdef`); absent or
+                # att_elo/def_elo are optional (added by `tippspiel fit-ratings`); absent or
                 # blank -> 0.0, which leaves the predictor at its pure-Elo behaviour.
                 teams.append(
                     Team(

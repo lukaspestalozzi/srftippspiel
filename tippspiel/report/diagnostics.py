@@ -523,7 +523,7 @@ def _render_markdown(meta, pb, notes, offdef, market, records, sim, bonus, anoma
     L.append("## 3. Offensive / defensive Elo")
     L.append("")
     if not offdef.get("available"):
-        L.append(f"_No att_elo/def_elo in teams.csv (run `tippspiel fit-offdef`); the off/def "
+        L.append(f"_No att_elo/def_elo in teams.csv (run `tippspiel fit-ratings`); the off/def "
                  f"volume term is inert. Predictor alpha = {offdef['alpha']}._")
     else:
         L.append(f"Per-team attack/defence log-rate ratings (fitted from historical goals). They "

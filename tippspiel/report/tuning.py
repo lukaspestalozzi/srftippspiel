@@ -20,7 +20,7 @@ from .diagnostics import _fixed_table, _json_default
 
 # Coarse default sweep grid. gmax is fixed (truncation, not a behaviour lever). ``alpha`` is
 # the off/def goal-volume weight; it needs att_elo/def_elo populated in the benchmark teams.csv
-# (run `tippspiel fit-offdef` per tournament) to have any effect — at alpha 0 it is a no-op.
+# (run `tippspiel fit-ratings` per tournament) to have any effect — at alpha 0 it is a no-op.
 # Trimmed from the pre-alpha grid (dropped the rarely-optimal extremes) so adding the alpha
 # axis keeps the sweep near its original runtime; the currently-tuned set stays reachable.
 DEFAULT_GRID: dict[str, list] = {

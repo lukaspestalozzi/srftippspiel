@@ -19,7 +19,7 @@ class Team:
     elo: float
     # Offensive / defensive log-goal-rate deviations from the field average, fitted from
     # historical match goals (``tippspiel/training/offdef_elo.py``; snapshot persisted by
-    # ``tippspiel fit-offdef``). Both default to 0.0 — an absent/un-fitted snapshot leaves the
+    # ``tippspiel fit-ratings``). Both default to 0.0 — an absent/un-fitted snapshot leaves the
     # predictor at its pure-Elo behaviour. Convention: higher ``att_elo`` = scores more than
     # the average team; higher ``def_elo`` = concedes fewer (stingier defence). A value of
     # +0.3 ≈ e^0.3 ≈ 1.35× the average rate. See EloPoissonPredictor for how they blend in.

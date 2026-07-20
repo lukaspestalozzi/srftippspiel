@@ -29,7 +29,7 @@ field; higher ``def`` = concedes fewer (stingier). Ratings are finally **zero-ce
 the field separately for att and def, so an average matchup expects ``mu`` total goals and the
 absolute level carries no meaning — only ``att_home - def_away`` does.
 
-This is an offline one-shot fit (run by ``tippspiel fit-offdef``), not the simulator, so it is
+This is an offline one-shot fit (run by ``tippspiel fit-ratings``), not the simulator, so it is
 a plain sequential loop rather than a vectorised kernel — the updates are inherently online.
 """
 

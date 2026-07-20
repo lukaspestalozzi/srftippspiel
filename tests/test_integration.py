@@ -180,7 +180,7 @@ def test_offdef_display_gated_on_alpha(tmp_path, small_cfg):
 
 
 def test_offdef_legend_hidden_when_ratings_all_zero(tmp_path, small_cfg):
-    # alpha>0 but no team has fitted att/def (fit-offdef never run) must NOT show the legend —
+    # alpha>0 but no team has fitted att/def (fit-ratings never run) must NOT show the legend —
     # otherwise it would promise a per-fixture att/def row that never renders.
     from tippspiel.data.file_provider import FileDataProvider
 

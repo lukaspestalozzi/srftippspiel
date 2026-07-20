@@ -23,10 +23,10 @@ predictor:
       rho: -0.1            # Dixon-Coles low-score correction (negative lifts draws vs 1:0/0:1)
       host_elo_bonus: 40   # Elo-equivalent bonus when a team plays in its own country
       ko_goal_scale: 1.2
-      alpha: 0.7           # off/def goal-volume weight (0 = pure Elo); see offdef: below + fit-offdef
+      alpha: 0.7           # off/def goal-volume weight (0 = pure Elo); see offdef: below + fit-ratings
 
 # Offensive/defensive Elo: per-team att_elo/def_elo (in teams.csv) add the goal-VOLUME
-# dimension a single Elo lacks, blended in via predictor.alpha above. `tippspiel fit-offdef`
+# dimension a single Elo lacks, blended in via predictor.alpha above. `tippspiel fit-ratings`
 # learns them from tippspiel/data/historical/international_results.csv up to the snapshot date
 # (default: day before first kickoff) with these online-update hyperparameters. All optional —
 # absent, the fitter uses these same defaults.
@@ -37,9 +37,9 @@ offdef:
   epochs: 3              # chronological passes over the corpus
   residual_cap: 5.0      # clamp on a single match's goal residual (dampens blowouts)
   weights: { friendly: 0.5, qualifier: 2.5, continental: 3.0, world_cup: 4.0, default: 1.0 }
-  # Live tournament: include the played results (11-16 June matchdays) in the off/def fit. The
-  # default snapshot (day before first kickoff) is for leak-free backtests; wc2026 is live, not a
-  # benchmark, so we deliberately fold in the games already played.
+  # Live tournament: fold every played WC2026 result into the off/def fit (the event ran to
+  # completion on 2026-07-19). The default snapshot (day before first kickoff) is for leak-free
+  # backtests; wc2026 is the live config, not a benchmark, so the played games are all included.
   snapshot_date: "2026-07-20"
 
 # Scalar base Elo. `source: corpus` derives `elo` from the same committed match corpus via the
@@ -76,9 +76,11 @@ strategy:
 tournament:
   name: wc2026
   display_name: FIFA World Cup 2026
-  completed: false        # not yet played; results.csv is conditioned on as it fills
+  completed: false        # designates the single live run-report tournament (site.py requires
+                          # exactly one completed:false). WC2026 is fully played out but stays the
+                          # rendered run report until the next tournament is wired in as the live one.
   data_dir: tournaments/wc2026   # relative to tippspiel/data/
-  elo_source: "corpus-derived (World-Football-Elo via fit-ratings, calibrated k_scale 1.4 / home_advantage 60). Group stage complete; round-of-32 complete and round-of-16 complete through M96 (ARG 3-2 EGY and SUI-COL pens SUI, 2026-07-07) in the corpus & results.csv; snapshot_date 2026-07-08 (day after the latest played match), elo + off/def fitted from the grown corpus. Odds are the ESPN + Polymarket consensus over all resolvable unplayed fixtures (the settled quarter-final slots M97-M100); the official third-place slot allocation is pinned by thirds_allocation.json."
+  elo_source: "corpus-derived (World-Football-Elo via fit-ratings, calibrated k_scale 1.4 / home_advantage 60). Tournament complete: all 104 matches played (final ESP 1-0 ARG, 2026-07-19). snapshot_date 2026-07-20 (day after the last played match); elo + off/def fitted from the grown corpus. Odds are the frozen ESPN + Polymarket consensus snapshots (every fixture is played, so all rows are frozen pre-match quotes); the official third-place slot allocation is pinned by thirds_allocation.json."
   odds_file: odds.csv     # ESPN public odds snapshot (DraftKings/Bet365 moneylines, de-vigged at load)
   # The knockout bracket (incl. the best-thirds slots and their allowed source groups) is
   # derived from fixtures.csv. The sidecar pins the official third-place slot allocation for

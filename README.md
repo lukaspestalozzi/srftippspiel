@@ -42,7 +42,7 @@ few seconds.
 ## Published reports
 
 The latest reports are published to **<https://lukaspestalozzi.github.io/srftippspiel/>**:
-the live WC 2026 `run` report, plus each completed benchmark tournament's a-priori tips
+the WC 2026 `run` report, plus each completed benchmark tournament's a-priori tips
 report and predictor backtest. CI rebuilds and deploys the site on every push to `main`
 (and on ready-for-review PRs, so changes can be checked on the live URL before merging) —
 see the `publish` job in `.github/workflows/ci.yml`.
@@ -124,24 +124,25 @@ live in its **config file**, not in the data folder. Adapters convert source dat
 files: `data/odds_adapter.py` (bookmaker 1X2 export → `odds.csv`) and
 `data/historical_results_adapter.py` (the international-match corpus that feeds `fit-ratings`;
 `data/eloratings_adapter.py` is a deprecated fallback now that scalar Elo is corpus-derived).
-Odds are a snapshot that moves continuously, and the live tournament's Elo moves as the corpus
-grows — refresh them as the tournament runs (see the `update-tournament-data` skill).
+Odds are a per-fixture snapshot and a live tournament's Elo moves as the corpus grows — while a
+tournament is running, refresh both after each matchday (see the `update-tournament-data` skill).
 
-### Provenance & the one remaining approximation
+### Provenance & the thirds-allocation fallback
 
 The teams, group draw (A–L), the 6 play-off winners (Czechia, Bosnia, Sweden, Türkiye,
 DR Congo, Iraq) and the **full match schedule** (group and knockout dates, UTC kickoff times,
-host countries) come per-match from the official post-draw fixture list. **Elo ratings** are an
-eloratings.net snapshot and **odds** an ESPN moneyline snapshot (de-vigged at load).
+host countries) come per-match from the official post-draw fixture list. **Elo ratings** are
+corpus-derived (World-Football-Elo fitted from the committed international-match corpus) and
+**odds** an ESPN + Polymarket consensus snapshot (de-vigged at load).
 
-One modelling approximation remains — the **third-placed → Round-of-32 allocation table.** The
-official FIFA "Annex C" table (mapping each of the 495 combinations of 8 qualifying third-placed
-groups to bracket slots) could not be fully confirmed, so `fixtures.csv` encodes only the
-confirmed structure (R32 pairings, the 8 receiving slots, each slot's allowed source groups via
+One modelling detail is worth noting — the **third-placed → Round-of-32 allocation table.** When
+the official FIFA "Annex C" table isn't pinned, `fixtures.csv` encodes only the confirmed
+structure (R32 pairings, the 8 receiving slots, each slot's allowed source groups via
 `3RD:<slot>:<groups>` refs) and the simulator resolves slots with a deterministic,
-constraint-respecting bipartite matching (`simulation/bracket.py`). Drop in a
-`thirds_allocation.json` sidecar (pointed at by `thirds_allocation_file` in the config) from the
-official table to override it.
+constraint-respecting bipartite matching (`simulation/bracket.py`). WC2026 **ships the official
+allocation** as a `thirds_allocation.json` sidecar (pointed at by `thirds_allocation_file` in the
+config), so its bracket is exact; the bipartite fallback is only used for an unplayed best-thirds
+format whose official table isn't yet confirmed.
 
 ## Accuracy note
 
